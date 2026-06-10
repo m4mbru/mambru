@@ -1,0 +1,67 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Tech stack: undetected (brand new project — to be determined during explore phase)
+  Architecture: undetected
+  Testing: none detected — strict_tdd set to false
+  Style: undetected
+  Description: A versatile desktop assistant with humor/sarcasm, local file access,
+    internet/web access, real-time chat and voice communication, and deep thoughts
+    via LLM reasoning.
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Define scope clearly — what is IN and OUT
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Keep requirements testable and unambiguous
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+    - Consider desktop integration patterns (tray, notifications, hotkeys)
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing code patterns once stack is chosen
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+testing:
+  strict_tdd: false
+  runner:
+    detected: false
+    command: ""
+    framework: ""
+  layers:
+    unit:
+      available: false
+      tool: ""
+    integration:
+      available: false
+      tool: ""
+    e2e:
+      available: false
+      tool: ""
+  coverage:
+    available: false
+    command: ""
+  quality:
+    linter:
+      available: false
+      command: ""
+    type_checker:
+      available: false
+      command: ""
+    formatter:
+      available: false
+      command: ""

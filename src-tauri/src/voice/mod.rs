@@ -1,0 +1,307 @@
+//! Voice pipeline — capture → VAD → STT → TTS → playback.
+//!
+//! # Architecture
+//!
+//! The pipeline is driven by push-to-talk (v1). The user holds a key while
+//! speaking; `feed_audio` buffers 100ms chunks through VAD for silence
+//! trimming. On key release (`stop_capture`) the accumulated audio is
+//! transcribed via the STT backend. The result is returned as text so the
+//! frontend can inject it into the chat flow.
+//!
+//! TTS is separate — `speak()` / `speak_async()` synthesise and play audio
+//! from any text (typically the LLM response).
+//!
+//! # Submodules
+//!
+//! - `vad` — WebRTC VAD for silence detection
+//! - `stt` — Speech-to-text (whisper.cpp / mock)
+//! - `tts` — Text-to-speech (Piper / mock) + rodio playback
+
+mod stt;
+mod tts;
+mod vad;
+
+pub use stt::{
+    create_stt_engine, MockSttBackend, SttBackend, WhisperBackend, WhisperConfig,
+};
+pub use tts::{
+    create_tts_engine, AudioOutput, MockTtsBackend, PiperBackend, PiperConfig, TtsBackend,
+};
+pub use vad::{chunk_into_frames, VadConfig, VadEngine};
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+
+// ---------------------------------------------------------------------------
+// VoicePipeline
+// ---------------------------------------------------------------------------
+
+/// Orchestrator for the voice capture → transcribe → speak pipeline.
+pub struct VoicePipeline {
+    /// Voice activity detection (silence trimming during capture).
+    vad: VadEngine,
+
+    /// Speech-to-text engine.
+    stt: Box<dyn SttBackend>,
+
+    /// Text-to-speech engine.
+    tts: Box<dyn TtsBackend>,
+
+    /// Audio output for playback.
+    audio: Option<AudioOutput>,
+
+    /// Buffer accumulating audio chunks during PTT capture.
+    capture_buffer: Vec<f32>,
+
+    /// Whether capture is currently active.
+    is_capturing: AtomicBool,
+
+    /// Whether TTS is currently speaking.
+    is_speaking: AtomicBool,
+
+    /// VAD config (for chunking).
+    vad_config: VadConfig,
+}
+
+impl VoicePipeline {
+    /// Create a new pipeline with the given engines.
+    pub fn new(vad: VadEngine, stt: Box<dyn SttBackend>, tts: Box<dyn TtsBackend>) -> Self {
+        let vad_config = vad.config().clone();
+
+        // Audio output may fail (no device) — that's OK, TTS just won't play.
+        let audio = AudioOutput::new().ok();
+
+        Self {
+            vad,
+            stt,
+            tts,
+            audio,
+            capture_buffer: Vec::with_capacity(16_000 * 30), // ~30s pre-alloc
+            is_capturing: AtomicBool::new(false),
+            is_speaking: AtomicBool::new(false),
+            vad_config,
+        }
+    }
+
+    /// Create a pipeline with default/mock engines (useful for testing).
+    pub fn with_mocks() -> Self {
+        Self::new(
+            VadEngine::default().expect("default VAD engine"),
+            Box::new(MockSttBackend::new()),
+            Box::new(MockTtsBackend::new()),
+        )
+    }
+
+    // -- Capture lifecycle ------------------------------------------------
+
+    /// Begin audio capture. Clears any previous buffer.
+    pub fn start_capture(&mut self) {
+        self.capture_buffer.clear();
+        self.is_capturing.store(true, Ordering::SeqCst);
+        self.vad.reset();
+    }
+
+    /// Feed a 100ms audio chunk into the pipeline.
+    ///
+    /// VAD trims silence: only speech-containing frames are kept.
+    /// If `feed_audio` is called while not capturing, the chunk is ignored.
+    ///
+    /// Returns `Ok(None)` during capture, `Ok(Some(text))` if speech ended
+    /// and transcription was triggered (not used in v1 — we transcribe on
+    /// stop_capture).
+    pub fn feed_audio(&mut self, chunk: &[f32]) -> Result<Option<String>> {
+        if !self.is_capturing.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+
+        // Chunk into VAD frames and check each frame
+        let frames = chunk_into_frames(chunk, self.vad_config.sample_rate, self.vad_config.frame_ms);
+
+        for frame in frames {
+            if self.vad.is_speech(&frame) {
+                // Speech detected — keep this frame
+                self.capture_buffer.extend_from_slice(&frame);
+            }
+            // Silence frames are dropped (trimmed)
+        }
+
+        Ok(None) // V1: no mid-capture transcription
+    }
+
+    /// Stop capture and transcribe the accumulated audio.
+    ///
+    /// Returns the transcribed text, or an empty string if no speech was
+    /// detected (buffer is empty after silence trimming).
+    pub async fn stop_capture(&mut self) -> Result<String> {
+        self.is_capturing.store(false, Ordering::SeqCst);
+
+        let audio = std::mem::take(&mut self.capture_buffer);
+
+        if audio.len() < self.vad_config.sample_rate as usize / 10 {
+            // Less than 100ms of speech — likely noise or key tap
+            return Ok(String::new());
+        }
+
+        eprintln!(
+            "[mambru] voice: transcribing {}ms of audio",
+            audio.len() * 1000 / self.vad_config.sample_rate as usize
+        );
+
+        let text = self.stt.transcribe(audio).await?;
+
+        Ok(text)
+    }
+
+    // -- TTS --------------------------------------------------------------
+
+    /// Synthesise and play text (blocking).
+    pub fn speak(&self, text: &str) -> Result<()> {
+        if !self.tts.is_available() {
+            eprintln!("[mambru] TTS: unavailable, skipping speech");
+            return Ok(());
+        }
+
+        self.is_speaking.store(true, Ordering::SeqCst);
+
+        // We need a Tokio runtime to call the async synthesize.  Use
+        // tokio::runtime::Handle if one is active, otherwise create a
+        // temporary runtime.
+        let audio = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => handle
+                .block_on(self.tts.synthesize(text))
+                .context("TTS synthesis failed")?,
+            Err(_) => {
+                // No runtime — create a one-shot
+                let rt = tokio::runtime::Runtime::new()
+                    .context("failed to create tokio runtime for TTS")?;
+                rt.block_on(self.tts.synthesize(text))
+                    .context("TTS synthesis failed")?
+            }
+        };
+
+        // Play via rodio
+        if let Some(ref output) = self.audio {
+            output.play_wav(&audio)?;
+        }
+
+        self.is_speaking.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Synthesise and play text (async).
+    pub async fn speak_async(&self, text: &str) -> Result<()> {
+        if !self.tts.is_available() {
+            eprintln!("[mambru] TTS: unavailable, skipping speech");
+            return Ok(());
+        }
+
+        self.is_speaking.store(true, Ordering::SeqCst);
+
+        let audio = self
+            .tts
+            .synthesize(text)
+            .await
+            .context("TTS synthesis failed")?;
+
+        if let Some(ref output) = self.audio {
+            output.play_wav_async(audio).await?;
+        }
+
+        self.is_speaking.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Stop any ongoing TTS playback.
+    pub fn stop_speaking(&self) {
+        self.is_speaking.store(false, Ordering::SeqCst);
+        // rodio doesn't support cancel without keeping a Sink reference.
+        // For v1 this is a best-effort signal.  Future phases can hold
+        // an Arc<Mutex<Option<Sink>>> for true cancellation.
+    }
+
+    // -- Status queries ---------------------------------------------------
+
+    pub fn is_capturing(&self) -> bool {
+        self.is_capturing.load(Ordering::SeqCst)
+    }
+
+    pub fn is_speaking(&self) -> bool {
+        self.is_speaking.load(Ordering::SeqCst)
+    }
+
+    pub fn stt_available(&self) -> bool {
+        self.stt.is_available()
+    }
+
+    pub fn tts_available(&self) -> bool {
+        self.tts.is_available()
+    }
+
+    pub fn audio_available(&self) -> bool {
+        self.audio.is_some()
+    }
+
+    /// Access the STT backend (for reconfiguration etc.).
+    pub fn stt_backend(&self) -> &dyn SttBackend {
+        self.stt.as_ref()
+    }
+
+    /// Access the TTS backend.
+    pub fn tts_backend(&self) -> &dyn TtsBackend {
+        self.tts.as_ref()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Integration smoke test: feed synthetic audio through the pipeline
+    /// with mock backends and verify it doesn't crash.
+    #[tokio::test]
+    async fn test_pipeline_smoke() {
+        let mut pipeline = VoicePipeline::with_mocks();
+
+        // Start capture
+        pipeline.start_capture();
+        assert!(pipeline.is_capturing());
+
+        // Feed some audio (sine wave to trigger VAD)
+        let chunk: Vec<f32> = (0..1600) // 100ms at 16kHz
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16_000.0).sin())
+            .collect();
+        let result = pipeline.feed_audio(&chunk).unwrap();
+        assert!(result.is_none()); // No mid-capture transcription
+
+        // Stop and transcribe
+        let text = pipeline.stop_capture().await.unwrap();
+        assert!(!text.is_empty(), "should return mock transcription");
+
+        assert!(!pipeline.is_capturing());
+    }
+
+    /// Verify that silence-only capture returns empty string.
+    #[tokio::test]
+    async fn test_pipeline_silence_is_empty() {
+        let mut pipeline = VoicePipeline::with_mocks();
+
+        pipeline.start_capture();
+        // Feed silence (all zeros, VAD will drop everything)
+        pipeline.feed_audio(&[0.0f32; 1600]).unwrap();
+        let text = pipeline.stop_capture().await.unwrap();
+        assert_eq!(text, "", "silence should produce empty text");
+    }
+
+    #[tokio::test]
+    async fn test_speak_no_crash() {
+        let pipeline = VoicePipeline::with_mocks();
+        // speak_async with mock TTS should not crash
+        pipeline.speak_async("hello world").await.unwrap();
+    }
+}

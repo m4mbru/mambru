@@ -1,0 +1,45 @@
+[package]
+name = "mambru"
+version = "0.1.0"
+description = "Mambru - Versatile Desktop Assistant"
+authors = ["jarvis-criollo"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
+anyhow = "1"
+thiserror = "1"
+futures = "0.3"
+async-trait = "0.1"
+async-stream = "0.3"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+
+# ── Voice pipeline (Phase 3) ──
+# NOTE: whisper-rs 0.13.2 stable, 0.14/0.16 also available.
+#       piper-rs doesn't exist as a crate — TTS uses subprocess-based PiperBackend.
+#       webrtc-vad replaces silero-vad-rs (not available on crates.io).
+whisper-rs = "0.13"
+webrtc-vad = "0.4"
+cpal = "0.15"
+rodio = "0.19"
+
+# ── LLM providers (Phase 2) ──
+# llm = "0.3"
+# ollama-rs = "0.4"
+
+# ── Headless browsing (Phase 4) ──
+# headless_chrome = "1"
+# chromiumoxide = "0.7"
