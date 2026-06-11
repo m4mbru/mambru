@@ -17,20 +17,20 @@
 //! - `stt` — Speech-to-text (whisper.cpp / mock)
 //! - `tts` — Text-to-speech (Piper / mock) + rodio playback
 
+pub(crate) mod download;
 mod stt;
 mod tts;
 mod vad;
 
 pub use stt::{
-    create_stt_engine, MockSttBackend, SttBackend, WhisperBackend, WhisperConfig,
+    create_stt_engine, MockSttBackend, SttBackend,
 };
 pub use tts::{
-    create_tts_engine, AudioOutput, MockTtsBackend, PiperBackend, PiperConfig, TtsBackend,
+    create_tts_engine, AudioOutput, MockTtsBackend, TtsBackend,
 };
 pub use vad::{chunk_into_frames, VadConfig, VadEngine};
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
@@ -97,10 +97,16 @@ impl VoicePipeline {
     // -- Capture lifecycle ------------------------------------------------
 
     /// Begin audio capture. Clears any previous buffer.
+    ///
+    /// Note: we deliberately do NOT call `self.vad.reset()` here.
+    /// WebRTC VAD's `reset()` resets the internal noise floor estimate,
+    /// which causes the first ~3 frames (90ms at 16kHz) to be classified
+    /// as silence even for full-scale speech — making voice capture fail
+    /// in aggressive mode. Carrying VAD state between captures is safe
+    /// and avoids this false-silence startup issue.
     pub fn start_capture(&mut self) {
         self.capture_buffer.clear();
         self.is_capturing.store(true, Ordering::SeqCst);
-        self.vad.reset();
     }
 
     /// Feed a 100ms audio chunk into the pipeline.
@@ -272,10 +278,20 @@ mod tests {
         pipeline.start_capture();
         assert!(pipeline.is_capturing());
 
-        // Feed some audio (sine wave to trigger VAD)
-        let chunk: Vec<f32> = (0..1600) // 100ms at 16kHz
-            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16_000.0).sin())
+        // Feed frequency-swept audio (200→2000Hz chirp) that webrtc-vad
+        // continuously detects as speech, unlike a steady pure tone which the
+        // aggressive-mode noise floor estimator learns in ~3 frames.
+        let sample_rate = 16_000;
+        let chirp_duration_ms = 400;
+        let chirp_samples = sample_rate * chirp_duration_ms / 1000;
+        let chunk: Vec<f32> = (0..chirp_samples)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                let freq = 200.0 + (t / 0.4) * 1800.0; // 200→2000Hz over 400ms
+                (2.0 * std::f32::consts::PI * freq * t).sin()
+            })
             .collect();
+
         let result = pipeline.feed_audio(&chunk).unwrap();
         assert!(result.is_none()); // No mid-capture transcription
 

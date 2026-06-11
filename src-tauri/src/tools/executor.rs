@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use tauri::AppHandle;
 use tokio::time::timeout;
 
 use crate::tools::commands::{CommandAction, ExecResult};
@@ -38,6 +39,7 @@ impl CommandExecutor {
     /// - Medium: 60 seconds
     /// - Dangerous: no timeout (waits for user input)
     pub async fn execute(
+        app: Option<&AppHandle>,
         action: &CommandAction,
         params: &HashMap<String, String>,
         risk: &RiskTier,
@@ -53,14 +55,14 @@ impl CommandExecutor {
                     RiskTier::Dangerous => None,
                 };
 
-                Self::run_shell(&cmd, &args, timeout).await
+                Self::run_shell(app, &cmd, &args, timeout).await
             }
             CommandAction::Script { path, args } => {
                 let script_path = interpolate(path, params);
                 let args: Vec<String> = args.iter().map(|a| interpolate(a, params)).collect();
 
                 let timeout = Some(Duration::from_secs(120));
-                Self::run_shell(&script_path, &args, timeout).await
+                Self::run_shell(app, &script_path, &args, timeout).await
             }
             CommandAction::Api { url, method, body } => {
                 let url = interpolate(url, params);
@@ -74,22 +76,23 @@ impl CommandExecutor {
     /// Run a shell command via `tauri-plugin-shell` or fall back to
     /// `std::process::Command`.
     async fn run_shell(
+        app: Option<&AppHandle>,
         cmd: &str,
         args: &[String],
         timeout: Option<Duration>,
     ) -> Result<ExecResult, String> {
-        // In tests, always use tokio::process (tauri-plugin-shell is not available)
+        // In tests, always use std::process (tauri-plugin-shell is not available)
         #[cfg(test)]
         {
+            let _ = app;
             return Self::run_std_process(cmd, args, timeout).await;
         }
 
-        // In production, try tauri-plugin-shell first, fallback to tokio::process.
-        // Currently falls back because the executor doesn't receive an AppHandle.
-        // TODO: Pass AppHandle to use tauri-plugin-shell when in Tauri context.
+        // In production, use tauri-plugin-shell when AppHandle is available
         #[cfg(not(test))]
-        {
-            Self::run_std_process(cmd, args, timeout).await
+        match app {
+            Some(handle) => Self::run_tauri_shell(handle, cmd, args, timeout).await,
+            None => Self::run_std_process(cmd, args, timeout).await,
         }
     }
 
@@ -134,24 +137,43 @@ impl CommandExecutor {
     /// Execute via Tauri shell plugin.
     #[cfg(not(test))]
     async fn run_tauri_shell(
+        app: &AppHandle,
         cmd: &str,
         args: &[String],
-        _timeout: Option<Duration>,
+        max_duration: Option<Duration>,
     ) -> Result<ExecResult, String> {
         use tauri_plugin_shell::ShellExt;
 
-        // We need an AppHandle to use the shell plugin. Since executor doesn't
-        // receive an AppHandle directly, this is a placeholder that attempts
-        // to resolve it from the async context or falls back.
-        //
-        // In practice, the caller needs to provide an AppHandle. For v1 we
-        // fall back to std::process if AppHandle isn't available.
-        //
-        // TODO: Refactor `execute` to accept `Option<&AppHandle>` so the
-        //       shell plugin can be used when available.
+        let exec = async {
+            let output = app
+                .shell()
+                .command(cmd)
+                .args(args)
+                .output()
+                .await
+                .map_err(|e| format!("shell plugin failed for `{cmd}`: {e}"))?;
 
-        // Simple std::process fallback for when we don't have AppHandle context
-        Self::run_std_process(cmd, args, _timeout)
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let combined = if stderr.is_empty() {
+                stdout
+            } else {
+                format!("{stdout}\n{stderr}")
+            };
+
+            Ok(ExecResult {
+                output: combined,
+                exit_code: output.status.code().unwrap_or(-1),
+            })
+        };
+
+        match max_duration {
+            Some(dur) => match timeout(dur, exec).await {
+                Ok(res) => res,
+                Err(_) => Err(format!("command `{cmd}` timed out after {dur:?}")),
+            },
+            None => exec.await,
+        }
     }
 
     /// Execute an API call via `reqwest`.
@@ -264,7 +286,7 @@ mod tests {
             body: None,
         };
         let params = HashMap::new();
-        let result = CommandExecutor::execute(&action, &params, &RiskTier::Medium).await;
+        let result = CommandExecutor::execute(None, &action, &params, &RiskTier::Medium).await;
         // This may fail in offline environments, but we check it doesn't panic
         if let Ok(res) = result {
             assert!(res.exit_code == 200 || res.exit_code == 0);
@@ -278,7 +300,7 @@ mod tests {
             args: vec![],
         };
         let params = HashMap::new();
-        let result = CommandExecutor::execute(&action, &params, &RiskTier::Safe).await;
+        let result = CommandExecutor::execute(None, &action, &params, &RiskTier::Safe).await;
         assert!(result.is_err());
     }
 }

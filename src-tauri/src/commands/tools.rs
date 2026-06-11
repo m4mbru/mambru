@@ -10,15 +10,15 @@
 //! * `search_web` — perform a web search via configured provider
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::Mutex;
 
-use crate::security::{AuditLog, RiskClassifier, RiskTier};
+use crate::security::{AuditLog, RiskTier};
 use crate::tools::commands::builder::CommandBuilder;
 use crate::tools::commands::registry::CommandRegistry;
-use crate::tools::commands::{Command, CommandAction, ExecResult};
+use crate::tools::commands::{Command, ExecResult};
 use crate::tools::{CommandExecutor, SearchClient, ToolCall, ToolResult};
 use crate::AppState;
 
@@ -47,10 +47,10 @@ pub struct PendingExecution {
 
 /// Return all user-defined commands (from the in-memory registry).
 #[tauri::command]
-pub fn get_commands(
+pub async fn get_commands(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<Vec<Command>, String> {
-    let state_lock = state.lock().map_err(|e| e.to_string())?;
+    let state_lock = state.inner().lock().await;
     Ok(state_lock.command_list.clone())
 }
 
@@ -62,11 +62,11 @@ pub fn get_commands(
 ///
 /// If a command with the same name already exists, it is replaced.
 #[tauri::command]
-pub fn save_command(
+pub async fn save_command(
     state: State<'_, Mutex<AppState>>,
     cmd: Command,
 ) -> Result<(), String> {
-    let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+    let mut state_lock = state.inner().lock().await;
 
     // Validate the trigger regex compiles
     regex::Regex::new(&cmd.trigger)
@@ -89,11 +89,11 @@ pub fn save_command(
 
 /// Delete a command by name.
 #[tauri::command]
-pub fn delete_command(
+pub async fn delete_command(
     state: State<'_, Mutex<AppState>>,
     name: String,
 ) -> Result<(), String> {
-    let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+    let mut state_lock = state.inner().lock().await;
 
     let removed = CommandRegistry::remove(&mut state_lock.command_list, &name)
         .map_err(|e| e.to_string())?;
@@ -135,7 +135,7 @@ pub async fn confirm_execution(
     approved: bool,
 ) -> Result<ExecResult, String> {
     let pending = {
-        let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+        let mut state_lock = state.inner().lock().await;
         state_lock.pending_executions.remove(&id)
     };
 
@@ -170,6 +170,7 @@ pub async fn confirm_execution(
 
     // Execute
     let result = CommandExecutor::execute(
+        Some(&app),
         &pending.command.action,
         &pending.params,
         &pending.risk,
@@ -208,7 +209,7 @@ pub async fn search_web(
     query: String,
 ) -> Result<Vec<crate::tools::SearchResult>, String> {
     let settings = {
-        let state_lock = state.lock().map_err(|e| e.to_string())?;
+        let state_lock = state.inner().lock().await;
         state_lock.settings.search.clone()
     };
 
@@ -224,6 +225,7 @@ pub async fn search_web(
 /// (e.g. web search during a conversation).
 #[tauri::command]
 pub async fn execute_tool_call(
+    app: AppHandle,
     state: State<'_, Mutex<AppState>>,
     tool_call: String, // JSON-serialised ToolCall
 ) -> Result<ToolResult, String> {
@@ -233,7 +235,7 @@ pub async fn execute_tool_call(
     let result = match call {
         ToolCall::Search { ref query } => {
             let settings = {
-                let state_lock = state.lock().map_err(|e| e.to_string())?;
+                let state_lock = state.inner().lock().await;
                 state_lock.settings.search.clone()
             };
             let client = SearchClient::new(&settings.provider, &settings.api_key, None);
@@ -252,7 +254,7 @@ pub async fn execute_tool_call(
                 },
             }
         }
-        _ => call.execute().await,
+        call => call.execute(Some(&app)).await,
     };
 
     Ok(result)

@@ -6,5 +6,3 @@
 //! appearance, personality, and search API keys.
 
 pub mod settings;
-
-pub use settings::*;

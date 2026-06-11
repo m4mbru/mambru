@@ -38,11 +38,10 @@ export async function sendMessage(
   content: string,
   conversationId?: string,
 ): Promise<string> {
-  const args: Record<string, unknown> = { content };
-  if (conversationId !== undefined) {
-    args.conversationId = conversationId;
-  }
-  return invoke('send_message', args);
+  return invoke('send_message', {
+    content,
+    conversationId: conversationId ?? null,
+  });
 }
 
 /** Fetch all persisted conversations (summaries). */

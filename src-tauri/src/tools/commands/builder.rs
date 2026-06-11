@@ -191,6 +191,16 @@ impl CommandBuilder {
     fn phrase_to_trigger(phrase: &str) -> String {
         let phrase = phrase.trim().trim_matches('.').trim();
 
+        // Truncate at natural clause separators ("it" + verb is a description,
+        // not part of the trigger)
+        let phrase = phrase
+            .split(" it ")
+            .next()
+            .unwrap_or(phrase)
+            .trim()
+            .trim_matches('.')
+            .trim();
+
         // If the phrase already contains {param} style patterns, preserve them
         if phrase.contains('{') {
             // This is already a template — use as-is with word boundary
@@ -209,9 +219,18 @@ impl CommandBuilder {
                 let trimmed = rest.trim();
                 if !trimmed.is_empty() {
                     // Take up to the first clause-ending punctuation
+                    // or conjunction like "and", "or", "but"
                     let end = trimmed
                         .find(|c: char| c == '.' || c == ',' || c == ';' || c == '!')
-                        .unwrap_or(trimmed.len());
+                        .unwrap_or_else(|| {
+                            // Also stop at conjunctions that indicate a new clause
+                            let conjunctions = [" and ", " or ", " but ", " so ", " then "];
+                            conjunctions
+                                .iter()
+                                .filter_map(|&conj| trimmed.find(conj))
+                                .min()
+                                .unwrap_or(trimmed.len())
+                        });
                     return trimmed[..end].trim().to_string();
                 }
             }
@@ -223,6 +242,7 @@ impl CommandBuilder {
     ///
     /// Examines the action args/URL for `{param}` placeholders and returns
     /// the list of expected parameter names.
+    #[allow(dead_code)]
     pub fn suggest_params(trigger: &str, action: &CommandAction) -> Vec<String> {
         let mut params: Vec<String> = Vec::new();
 
@@ -336,7 +356,9 @@ mod tests {
 
     #[test]
     fn test_extract_target() {
-        let lower = "open Firefox and search";
+        // Note: real usage lowercases the input before calling extract_target,
+        // so the input is already lowercase in practice.
+        let lower = "open firefox and search";
         let target = CommandBuilder::extract_target(lower, &["open "]);
         assert_eq!(target, "firefox");
     }

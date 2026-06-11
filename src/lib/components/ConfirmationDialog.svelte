@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { createEventDispatcher, fly, scale } from 'svelte/transition';
+  import { createEventDispatcher } from 'svelte';
+  import { fly, scale } from 'svelte/transition';
   import { confirmExecution } from '../api/tools';
   import type { PendingExecutionEvent } from '../api/tools';
   import { conversation } from '../stores/conversation';

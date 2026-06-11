@@ -1,21 +1,12 @@
 //! Tauri IPC command handlers for the voice pipeline.
 //!
-//! Provides push-to-talk capture lifecycle and TTS control.
-//! The commands are thin adapters that delegate to the `voice::VoicePipeline`.
-
-use std::sync::Mutex;
+//! Provides push-to-talk capture lifecycle, TTS control, and model
+//! download management.
+//! The commands are thin adapters that delegate to the `voice` domain module.
 
 use tauri::AppHandle;
 use tauri::Emitter;
-
-use crate::voice::VoicePipeline;
-
-// ---------------------------------------------------------------------------
-// Helper: acquire the pipeline from AppState
-// ---------------------------------------------------------------------------
-
-/// Convenience alias for the locked pipeline inside AppState.
-type LockedPipeline<'a> = std::sync::MutexGuard<'a, crate::AppState>;
+use tokio::sync::Mutex;
 
 /// Emit a voice-related event to the frontend.
 fn emit_event(app: &AppHandle, event: &str, payload: &str) {
@@ -36,7 +27,7 @@ pub async fn start_voice_capture(
     app: AppHandle,
     state: tauri::State<'_, Mutex<crate::AppState>>,
 ) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| e.to_string())?;
+    let mut app_state = state.inner().lock().await;
 
     if app_state.voice_pipeline.is_capturing() {
         emit_event(&app, "voice:error", "Already capturing");
@@ -63,7 +54,7 @@ pub async fn stop_voice_capture(
     app: AppHandle,
     state: tauri::State<'_, Mutex<crate::AppState>>,
 ) -> Result<String, String> {
-    let mut app_state = state.lock().map_err(|e| e.to_string())?;
+    let mut app_state = state.inner().lock().await;
 
     if !app_state.voice_pipeline.is_capturing() {
         emit_event(&app, "voice:error", "Not capturing");
@@ -101,7 +92,7 @@ pub async fn toggle_tts(
     app: AppHandle,
     state: tauri::State<'_, Mutex<crate::AppState>>,
 ) -> Result<bool, String> {
-    let mut app_state = state.lock().map_err(|e| e.to_string())?;
+    let mut app_state = state.inner().lock().await;
 
     // Toggle via settings
     app_state.settings.voice.tts_enabled = !app_state.settings.voice.tts_enabled;
@@ -131,7 +122,7 @@ pub async fn speak_text(
     state: tauri::State<'_, Mutex<crate::AppState>>,
     text: String,
 ) -> Result<(), String> {
-    let app_state = state.lock().map_err(|e| e.to_string())?;
+    let app_state = state.inner().lock().await;
 
     if !app_state.settings.voice.tts_enabled {
         emit_event(&app, "voice:tts-skipped", "TTS is disabled");
@@ -147,7 +138,7 @@ pub async fn speak_text(
     drop(app_state);
 
     // Re-acquire for speaking.  speak() takes &self so a shared lock is fine.
-    let state2 = state.lock().map_err(|e| e.to_string())?;
+    let state2 = state.inner().lock().await;
     state2
         .voice_pipeline
         .speak(&text)
@@ -165,7 +156,7 @@ pub async fn speak_text(
 pub async fn get_voice_status(
     state: tauri::State<'_, Mutex<crate::AppState>>,
 ) -> Result<VoiceStatus, String> {
-    let app_state = state.lock().map_err(|e| e.to_string())?;
+    let app_state = state.inner().lock().await;
     Ok(VoiceStatus {
         is_capturing: app_state.voice_pipeline.is_capturing(),
         is_speaking: app_state.voice_pipeline.is_speaking(),
@@ -186,4 +177,26 @@ pub struct VoiceStatus {
     pub stt_available: bool,
     pub tts_available: bool,
     pub tts_enabled: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Model download commands — re-exported from voice::download
+// ---------------------------------------------------------------------------
+
+/// Check which voice models are present on disk.
+#[tauri::command]
+pub async fn check_models(
+    app: AppHandle,
+) -> Result<std::collections::HashMap<crate::voice::download::ModelKind, crate::voice::download::ModelState>, String>
+{
+    crate::voice::download::check_models(app).await
+}
+
+/// Start downloading a voice model in the background.
+#[tauri::command]
+pub async fn start_download(
+    app: AppHandle,
+    kind: crate::voice::download::ModelKind,
+) -> Result<(), String> {
+    crate::voice::download::start_download(app, kind).await
 }

@@ -70,6 +70,8 @@ impl CommandRegistry {
         };
 
         // Validate each command
+        // Capture length BEFORE consuming parsed.command via into_iter().
+        let total = parsed.command.len();
         let valid: Vec<Command> = parsed
             .command
             .into_iter()
@@ -97,12 +99,12 @@ impl CommandRegistry {
             })
             .collect();
 
-        if valid.len() < parsed.command.len() {
+        if valid.len() < total {
             eprintln!(
                 "[mambru] WARNING: {}/{} commands loaded ({} had errors)",
                 valid.len(),
-                parsed.command.len(),
-                parsed.command.len() - valid.len()
+                total,
+                total - valid.len()
             );
         }
 
@@ -131,6 +133,7 @@ impl CommandRegistry {
     /// Add a command to the in-memory list and persist.
     ///
     /// Returns an error if a command with the same name already exists.
+    #[allow(dead_code)]
     pub fn add(commands: &mut Vec<Command>, cmd: Command) -> Result<()> {
         if commands.iter().any(|c| c.name == cmd.name) {
             anyhow::bail!("A command named `{}` already exists", cmd.name);
@@ -158,6 +161,7 @@ impl CommandRegistry {
     }
 
     /// Replace the in-memory list (used after a reload).
+    #[allow(dead_code)]
     pub fn set_commands(&mut self, commands: Vec<Command>) {
         self.commands = commands;
     }
@@ -187,6 +191,11 @@ mod tests {
     use super::*;
     use crate::security::RiskTier;
     use crate::tools::commands::CommandAction;
+    use std::sync::Mutex;
+
+    /// Serializes registry file access so parallel test runs don't
+    /// corrupt the shared ~/.config/mambru/commands.toml.
+    static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
     fn sample_cmd(name: &str) -> Command {
         Command {
@@ -204,6 +213,10 @@ mod tests {
 
     #[test]
     fn test_add_and_remove() {
+        let _lock = REGISTRY_LOCK.lock().unwrap();
+        let path = CommandRegistry::storage_path();
+        let _ = fs::remove_file(&path);
+
         let mut cmds = Vec::new();
         CommandRegistry::add(&mut cmds, sample_cmd("test1")).unwrap();
         assert_eq!(cmds.len(), 1);
@@ -215,10 +228,16 @@ mod tests {
         assert!(removed);
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].name, "test2");
+
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn test_add_duplicate_fails() {
+        let _lock = REGISTRY_LOCK.lock().unwrap();
+        let path = CommandRegistry::storage_path();
+        let _ = fs::remove_file(&path);
+
         let mut cmds = Vec::new();
         CommandRegistry::add(&mut cmds, sample_cmd("dup")).unwrap();
         let err = CommandRegistry::add(&mut cmds, sample_cmd("dup")).unwrap_err();
@@ -227,18 +246,30 @@ mod tests {
             "error should mention duplicate: {}",
             err
         );
+
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn test_remove_nonexistent() {
+        let _lock = REGISTRY_LOCK.lock().unwrap();
+        let path = CommandRegistry::storage_path();
+        let _ = fs::remove_file(&path);
+
         let mut cmds = Vec::new();
         CommandRegistry::add(&mut cmds, sample_cmd("exists")).unwrap();
         let removed = CommandRegistry::remove(&mut cmds, "nope").unwrap();
         assert!(!removed);
+
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn test_toml_round_trip() {
+        let _lock = REGISTRY_LOCK.lock().unwrap();
+        let path = CommandRegistry::storage_path();
+        let _ = fs::remove_file(&path);
+
         let cmds = vec![sample_cmd("roundtrip")];
         CommandRegistry::save(&cmds).unwrap();
 
@@ -247,7 +278,6 @@ mod tests {
         assert_eq!(registry.all()[0].name, "roundtrip");
 
         // Cleanup
-        let path = CommandRegistry::storage_path();
         let _ = fs::remove_file(&path);
     }
 }

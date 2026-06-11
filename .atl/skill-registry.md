@@ -9,6 +9,7 @@
 | chained-pr | PRs over 400 lines, stacked PRs, review slices | `file:///C:/Users/JAJKA/.config/opencode/skills/chained-pr/SKILL.md` | user |
 | cognitive-doc-design | writing guides, READMEs, RFCs, onboarding, architecture, review docs | `file:///C:/Users/JAJKA/.config/opencode/skills/cognitive-doc-design/SKILL.md` | user |
 | comment-writer | PR feedback, issue replies, reviews, Slack messages, GitHub comments | `file:///C:/Users/JAJKA/.config/opencode/skills/comment-writer/SKILL.md` | user |
+| customize-opencode | editing opencode configuration, opencode.json, agents, skills, MCP servers, plugin/permission rules | `file:///C:/Users/JAJKA/%3Cbuilt-in%3E` | built-in |
 | go-testing | Go tests, go test coverage, Bubbletea teatest, golden files | `file:///C:/Users/JAJKA/.config/opencode/skills/go-testing/SKILL.md` | user |
 | issue-creation | creating GitHub issues, bug reports, feature requests | `file:///C:/Users/JAJKA/.config/opencode/skills/issue-creation/SKILL.md` | user |
 | judgment-day | dual review, adversarial review, juzgar | `file:///C:/Users/JAJKA/.config/opencode/skills/judgment-day/SKILL.md` | user |
@@ -18,11 +19,12 @@
 
 ## Convention Files
 
-*None detected — project is brand new.*
+- `C:\Users\JAJKA\.config\opencode\AGENTS.md` — project-level agent instructions (system prompt)
 
 ## Notes
 
 - **SDD skills** (sdd-*) are omitted from this registry — they are lifecycle-managed by the orchestrator.
 - **Skill-registry** skill is omitted — it manages this file.
 - **Shared** (_shared) skills are omitted — they provide conventions and references for SDD skills.
-- No project-level skills detected (no `skills/`, `.opencode/skills/`, `.claude/skills/`, `.gemini/skills/`, `.cursor/skills/`, etc. in the project root).
+- No project-level skills detected (no `skills/`, `.opencode/skills/`, `.claude/skills/` in the project root).
+- Deduplication: user-level skills from `~/.config/opencode/skills/` take precedence over `~/.claude/skills/`; all non-SDD skills are identical in both directories.

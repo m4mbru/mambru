@@ -104,6 +104,7 @@ impl WhisperBackend {
     }
 
     /// Try to load the model from the default config directory.
+    #[allow(dead_code)]
     pub fn try_default() -> Self {
         let config = WhisperConfig::default();
         let model_file = find_model_file(&config.model_path);
@@ -122,45 +123,6 @@ impl WhisperBackend {
         }
     }
 
-    fn run_transcription(&self, audio: &[f32]) -> Result<String> {
-        let mut params = whisper_rs::FullParams::new(
-            whisper_rs::SamplingStrategy::Greedy { best_of: 1 },
-        );
-
-        params.set_n_threads(self.config.n_threads);
-        if let Some(ref lang) = self.config.language {
-            params.set_language(Some(lang))?;
-        } else {
-            params.set_detect_language(true);
-        }
-
-        // Run inference (blocking — called from async context)
-        let mut state = self
-            .ctx
-            .create_state()
-            .context("failed to create whisper state")?;
-
-        state
-            .full(params, audio)
-            .context("whisper transcription failed")?;
-
-        let n_segments = state
-            .full_n_segments()
-            .context("failed to get segment count")?;
-
-        let mut text = String::new();
-        for i in 0..n_segments {
-            let segment = state
-                .full_get_segment_text(i)
-                .context("failed to get segment text")?;
-            if !text.is_empty() {
-                text.push(' ');
-            }
-            text.push_str(&segment);
-        }
-
-        Ok(text.trim().to_string())
-    }
 }
 
 fn find_model_file(dir: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -170,7 +132,7 @@ fn find_model_file(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     for entry in std::fs::read_dir(dir).ok()? {
         let path = entry.ok()?.path();
         if let Some(ext) = path.extension() {
-            if ext == "bin" || ext == "ggml" {
+            if ext == "bin" || ext == "ggml" || ext == "gguf" {
                 return Some(path);
             }
         }
@@ -201,10 +163,15 @@ impl SttBackend for WhisperBackend {
         // that holds the context and communicates via channels.
         let model_path = self.model_path_str.clone();
         let audio_clone = audio;
+        let language = self.config.language.clone();
+        let n_threads = self.config.n_threads;
 
         tokio::task::spawn_blocking(move || -> Result<String> {
-            let ctx = whisper_rs::WhisperContext::new(&model_path)
-                .map_err(|e| anyhow::anyhow!("failed to load whisper model: {e}"))?;
+            let ctx = whisper_rs::WhisperContext::new_with_params(
+                &model_path,
+                whisper_rs::WhisperContextParameters::default(),
+            )
+            .map_err(|e| anyhow::anyhow!("failed to load whisper model: {e}"))?;
             let mut state = ctx
                 .create_state()
                 .map_err(|e| anyhow::anyhow!("failed to create state: {e}"))?;
@@ -212,21 +179,23 @@ impl SttBackend for WhisperBackend {
             let mut params = whisper_rs::FullParams::new(
                 whisper_rs::SamplingStrategy::Greedy { best_of: 1 },
             );
-            params.set_n_threads(4);
+            params.set_n_threads(n_threads as i32);
+            if let Some(ref lang) = language {
+                params.set_language(Some(lang.as_str()));
+            }
 
             state
                 .full(params, &audio_clone)
                 .map_err(|e| anyhow::anyhow!("transcription failed: {e}"))?;
 
-            let n = state
-                .full_n_segments()
-                .map_err(|e| anyhow::anyhow!("segment count failed: {e}"))?;
-
+            let n = state.full_n_segments();
             let mut out = String::new();
             for i in 0..n {
                 let seg = state
-                    .full_get_segment_text(i)
-                    .map_err(|e| anyhow::anyhow!("segment {i} failed: {e}"))?;
+                    .get_segment(i)
+                    .ok_or_else(|| anyhow::anyhow!("segment {i} not found"))?
+                    .to_str()
+                    .map_err(|e| anyhow::anyhow!("segment {i} text failed: {e}"))?;
                 if !out.is_empty() {
                     out.push(' ');
                 }
@@ -270,6 +239,7 @@ impl MockSttBackend {
     }
 
     /// Create a backend that always returns the given text.
+    #[allow(dead_code)]
     pub fn with_response(text: &str) -> Self {
         Self {
             fixed_response: Some(text.to_string()),

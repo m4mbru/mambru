@@ -1,0 +1,32 @@
+# Auto-detect text files, normalize to LF in the repo
+* text=auto
+
+# Rust — always LF
+*.rs text eol=lf
+
+# Svelte / TypeScript / JS / CSS / HTML — always LF
+*.svelte text eol=lf
+*.ts text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+
+# Config / Markdown — always LF
+*.toml text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+
+# Batch files — keep CRLF (Windows needs them)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaries — treat as binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.bin binary
+*.ggml binary
+*.gguf binary

@@ -1,6 +1,5 @@
-use std::sync::Mutex;
-
 use tauri::State;
+use tokio::sync::Mutex;
 
 use crate::config::settings::Settings;
 use crate::AppState;
@@ -14,7 +13,7 @@ use crate::AppState;
 pub async fn get_settings(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<Settings, String> {
-    let state_lock = state.lock().map_err(|e| e.to_string())?;
+    let state_lock = state.inner().lock().await;
     Ok(state_lock.settings_owned())
 }
 
@@ -28,7 +27,7 @@ pub async fn set_settings(
     settings.save().map_err(|e| e.to_string())?;
 
     // Update in-memory state and reconfigure the provider
-    let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+    let mut state_lock = state.inner().lock().await;
     state_lock.update_settings(settings);
     Ok(())
 }

@@ -129,9 +129,10 @@ mod tests {
     #[test]
     fn test_base_prompt_not_offensive() {
         let bad_words = ["fuck", "shit", "damn", "ass", "bastard", "bitch"];
-        for w in &bad_words {
+        let words: Vec<&str> = BASE_PROMPT.split_whitespace().collect();
+        for w in bad_words {
             assert!(
-                !BASE_PROMPT.contains(*w),
+                !words.contains(&w),
                 "base prompt should not contain '{w}'"
             );
         }

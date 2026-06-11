@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use rodio::Source;
 
 // ---------------------------------------------------------------------------
 // Trait — TtsBackend
@@ -256,8 +257,16 @@ pub struct AudioOutput {
     _stream: rodio::OutputStream,
     stream_handle: rodio::OutputStreamHandle,
     is_speaking: Arc<AtomicBool>,
+    #[allow(dead_code)]
     volume: f32,
 }
+
+// SAFETY: AudioOutput is only accessed through Mutex<AppState> which
+// serializes all access. The underlying rodio OutputStream is !Send
+// for macOS/AudioUnit reasons — on Windows WASAPI it is safe to use
+// across threads when access is serialized through the Mutex.
+unsafe impl Send for AudioOutput {}
+unsafe impl Sync for AudioOutput {}
 
 impl AudioOutput {
     /// Initialise the audio output device.
@@ -285,7 +294,7 @@ impl AudioOutput {
             .stream_handle
             .play_raw(source.convert_samples::<f32>())
             .map_err(|e| anyhow::anyhow!("playback failed: {e}"))
-            .and_then(|sink| {
+            .and_then(|_sink| {
                 // Wait for playback to finish
                 // rodio's Sink::sleep_until_end would be ideal but we
                 // need to keep it simple — just sleep and check
@@ -326,10 +335,12 @@ impl AudioOutput {
         .context("playback thread panicked")?
     }
 
+    #[allow(dead_code)]
     pub fn is_speaking(&self) -> bool {
         self.is_speaking.load(Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
     pub fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
     }
@@ -351,6 +362,7 @@ impl MockTtsBackend {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_delay(ms: u64) -> Self {
         Self {
             simulated_delay_ms: ms,

@@ -8,7 +8,7 @@
 //! itself never truncates or rewrites existing entries.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -82,6 +82,7 @@ impl AuditLog {
     }
 
     /// Read the most recent `limit` entries (newest first).
+    #[allow(dead_code)]
     pub fn list(limit: usize) -> Result<Vec<AuditEntry>, String> {
         let path = Self::path();
         if !path.exists() {
@@ -108,6 +109,7 @@ impl AuditLog {
     }
 
     /// Return the total number of entries in the log.
+    #[allow(dead_code)]
     pub fn count() -> Result<usize, String> {
         let path = Self::path();
         if !path.exists() {
@@ -134,6 +136,11 @@ impl AuditLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serializes audit file access so parallel test runs don't
+    /// interfere with each other (all tests share ~/.config/mambru/audit.jsonl).
+    static AUDIT_LOCK: Mutex<()> = Mutex::new(());
 
     fn sample_entry() -> AuditEntry {
         AuditEntry {
@@ -148,6 +155,7 @@ mod tests {
 
     #[test]
     fn test_append_and_list() {
+        let _lock = AUDIT_LOCK.lock().unwrap();
         let path = AuditLog::path();
         // Clean up any previous test file
         let _ = fs::remove_file(&path);
@@ -166,6 +174,7 @@ mod tests {
 
     #[test]
     fn test_list_empty_when_no_file() {
+        let _lock = AUDIT_LOCK.lock().unwrap();
         let path = AuditLog::path();
         let _ = fs::remove_file(&path);
 
@@ -175,6 +184,7 @@ mod tests {
 
     #[test]
     fn test_count() {
+        let _lock = AUDIT_LOCK.lock().unwrap();
         let path = AuditLog::path();
         let _ = fs::remove_file(&path);
 
@@ -188,6 +198,7 @@ mod tests {
 
     #[test]
     fn test_list_respects_limit() {
+        let _lock = AUDIT_LOCK.lock().unwrap();
         let path = AuditLog::path();
         let _ = fs::remove_file(&path);
 
@@ -203,6 +214,7 @@ mod tests {
 
     #[test]
     fn test_rejected_entry() {
+        let _lock = AUDIT_LOCK.lock().unwrap();
         let path = AuditLog::path();
         let _ = fs::remove_file(&path);
 

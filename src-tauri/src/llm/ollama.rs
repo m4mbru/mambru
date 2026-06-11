@@ -73,15 +73,36 @@ impl LLMProvider for OllamaProvider {
 impl OllamaProvider {
     /// Non-streaming path: collect the full response and yield it as a single
     /// item stream so callers don't need to branch.
+    /// Log a debug message to the ollama provider log file.
+    fn log_ollama(msg: &str) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(r"C:\Users\JAJKA\AppData\Roaming\com.mambru.desktop\mambru-ollama.log")
+        {
+            use std::io::Write;
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = writeln!(f, "[{ts}] {msg}");
+        }
+    }
+
     async fn non_streaming_chat(
         client: Client,
         url: String,
         body: Value,
     ) -> Result<ChatStream, LlmError> {
         let resp = client.post(&url).json(&body).send().await?;
+        let status = resp.status();
         let text = resp.text().await?;
 
+        Self::log_ollama(&format!("status={status}, text.len()={}", text.len()));
+        Self::log_ollama(&format!("raw body: {}", &text[..text.len().min(1000)]));
+
         let content = extract_content(&text).unwrap_or_default();
+        Self::log_ollama(&format!("extract_content returned: len={}, empty={}", content.len(), content.is_empty()));
 
         let stream = async_stream::stream! {
             yield Ok(content);

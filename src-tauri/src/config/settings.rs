@@ -37,7 +37,7 @@ pub struct ProviderSettings {
 pub struct ProviderEndpoint {
     /// Never serialised when empty (keys are sensitive and should be
     /// git-ignored; this just avoids writing empty strings to the file).
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(skip_serializing_if = "String::is_empty", default)]
     pub api_key: String,
     pub base_url: String,
     pub model: String,
@@ -81,7 +81,7 @@ pub struct PersonalityConfig {
 pub struct SearchConfig {
     /// `"tavily"` or `"serpapi"`.
     pub provider: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(skip_serializing_if = "String::is_empty", default)]
     pub api_key: String,
 }
 
@@ -106,7 +106,7 @@ impl Default for Settings {
                 },
                 ollama: OllamaEndpoint {
                     base_url: "http://localhost:11434".into(),
-                    model: "llama3".into(),
+                    model: "llama3.2:3b".into(),
                 },
             },
             voice: VoiceConfig {
@@ -226,28 +226,28 @@ mod tests {
             [provider]
             active = "openai"
             [provider.openai]
-            api_key = "sk-test"
-            base_url = "https://api.openai.com/v1"
+            api-key = "sk-test"
+            base-url = "https://api.openai.com/v1"
             model = "gpt-4"
             [provider.anthropic]
-            api_key = ""
-            base_url = "https://api.anthropic.com/v1"
+            api-key = ""
+            base-url = "https://api.anthropic.com/v1"
             model = "claude-sonnet-4-20250514"
             [provider.ollama]
-            base_url = "http://localhost:11434"
-            model = "llama3"
+            base-url = "http://localhost:11434"
+            model = "llama3.2:3b"
             [voice]
             enabled = true
-            ptt_key = "Space"
-            tts_enabled = false
+            ptt-key = "Space"
+            tts-enabled = false
             [appearance]
             theme = "light"
             [personality]
             preset = "professional"
-            custom_prompt = ""
+            custom-prompt = ""
             [search]
             provider = "tavily"
-            api_key = "sk-search"
+            api-key = "sk-search"
         "#;
         let settings: Settings = toml::from_str(toml_str).expect("should parse valid TOML");
         assert_eq!(settings.provider.active, "openai");
@@ -316,28 +316,28 @@ mod tests {
             [provider]
             active = "ollama"
             [provider.openai]
-            api_key = ""
-            base_url = ""
+            api-key = ""
+            base-url = ""
             model = ""
             [provider.anthropic]
-            api_key = ""
-            base_url = ""
+            api-key = ""
+            base-url = ""
             model = ""
             [provider.ollama]
-            base_url = ""
+            base-url = ""
             model = ""
             [voice]
             enabled = false
-            ptt_key = ""
-            tts_enabled = false
+            ptt-key = ""
+            tts-enabled = false
             [appearance]
             theme = ""
             [personality]
             preset = ""
-            custom_prompt = ""
+            custom-prompt = ""
             [search]
             provider = ""
-            api_key = ""
+            api-key = ""
         "#;
         let settings: Settings = toml::from_str(toml_str).expect("should parse minimal TOML");
         // Fields that have defaults in Rust should not be set

@@ -2,13 +2,21 @@
 schema: spec-driven
 
 context: |
-  Tech stack: undetected (brand new project — to be determined during explore phase)
-  Architecture: undetected
-  Testing: none detected — strict_tdd set to false
-  Style: undetected
-  Description: A versatile desktop assistant with humor/sarcasm, local file access,
+  Project: Mambru — a versatile desktop assistant with humor/sarcasm, local file access,
     internet/web access, real-time chat and voice communication, and deep thoughts
     via LLM reasoning.
+  Stack: Tauri v2 (Rust backend) + Svelte 4 + TypeScript + Vite 5 + Vitest 2
+  Architecture: Tauri desktop app with IPC-based frontend/backend separation.
+    Frontend: Svelte 4 with stores (conversation, settings, voice), Svelte components
+    (Chat, MessageBubble, Settings, VoiceControls, ConfirmationDialog), and API layer
+    (llm.ts, tools.ts, voice.ts). Backend: Rust modules for LLM providers (Ollama,
+    OpenAI/Anthropic), conversation management, voice pipeline (VAD, STT, TTS), config/
+    settings persistence in TOML, tool execution, command matching, security/audit.
+  Testing: Vitest frontend tests (37 passing across 3 test files). Rust backend has
+    15+ unit/integration tests but cannot compile yet (missing dlltool.exe in toolchain).
+  Strict TDD: enabled — frontend tests are working and must pass before frontend changes.
+  Conventions: Conventional commits (no AI attribution), Svelte 4 patterns, Tauri v2
+    plugin APIs, Rust edition 2021 with async/await.
 
 rules:
   proposal:
@@ -27,41 +35,41 @@ rules:
     - Keep tasks completable in one session
   apply:
     - Follow existing code patterns once stack is chosen
-    tdd: false
-    test_command: ""
+    tdd: true
+    test_command: "npm test"
   verify:
-    test_command: ""
+    test_command: "npm test"
     build_command: ""
     coverage_threshold: 0
   archive:
     - Warn before merging destructive deltas
 
 testing:
-  strict_tdd: false
+  strict_tdd: true
   runner:
-    detected: false
-    command: ""
-    framework: ""
+    detected: true
+    command: "npm test"
+    framework: "vitest"
   layers:
     unit:
-      available: false
-      tool: ""
+      available: true
+      tool: "vitest + @testing-library/svelte"
     integration:
-      available: false
-      tool: ""
+      available: true
+      tool: "vitest + jsdom (frontend); Rust #[cfg(test)] (backend, blocked by compilation)"
     e2e:
       available: false
       tool: ""
   coverage:
-    available: false
-    command: ""
+    available: true
+    command: "vitest --coverage"
   quality:
     linter:
       available: false
       command: ""
     type_checker:
-      available: false
-      command: ""
+      available: true
+      command: "npm run check (svelte-check + TypeScript strict mode)"
     formatter:
       available: false
       command: ""

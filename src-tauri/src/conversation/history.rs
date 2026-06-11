@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};

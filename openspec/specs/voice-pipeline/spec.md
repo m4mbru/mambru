@@ -37,7 +37,7 @@ The system MUST capture audio via the `cpal` crate in 100ms chunks for real-time
 
 ### Requirement: Voice Activity Detection
 
-The system SHOULD use Silero VAD to detect speech segments and filter silence.
+The system MUST use WebRTC VAD (via the `webrtc-vad` crate) to detect speech segments and filter silence.
 
 #### Scenario: Silence is trimmed
 
@@ -52,6 +52,14 @@ The system SHOULD use Silero VAD to detect speech segments and filter silence.
 - WHEN VAD processes the audio chunks
 - THEN speech segments are identified
 - AND non-speech segments are trimmed from the input
+
+#### Scenario: VAD configured for silence trimming
+
+- GIVEN the push-to-talk key is held
+- WHEN the VAD engine is initialized
+- THEN the VAD mode is set to aggressive for maximum silence suppression
+- AND the sample rate is configured at 16 kHz
+- AND the frame duration is set to 30 ms
 
 ### Requirement: Speech-to-Text
 
@@ -90,6 +98,14 @@ The system SHOULD generate audio from LLM response text using Piper TTS, if TTS 
 - AND the response is displayed as text only
 - AND the user is notified once that TTS is unavailable
 
+#### Scenario: Piper binary not found at startup
+
+- GIVEN the Piper binary is not on the system PATH and not found at configured install paths
+- WHEN the application initializes the TTS backend
+- THEN TTS is disabled
+- AND the user is notified that TTS requires the Piper binary
+- AND the model download dialog offers a Piper download option
+
 ### Requirement: Audio Playback
 
 The system MUST play generated audio via the `rodio` crate.
@@ -112,3 +128,10 @@ The system MUST operate in text-only mode when voice models or audio devices are
 - THEN the voice features are disabled
 - AND the chat functions normally in text-only mode
 - AND the Settings show which voice dependencies are missing
+
+#### Scenario: Download dialog shown instead of silent disable
+
+- GIVEN whisper or Piper models are not found at startup
+- WHEN the application initializes voice features
+- THEN a download dialog is displayed listing the missing models
+- AND the user can download them or dismiss to proceed in text-only mode

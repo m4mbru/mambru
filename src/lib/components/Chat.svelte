@@ -9,6 +9,9 @@
     listenForError,
     getHistory,
   } from '../api/llm';
+  import { invoke } from '@tauri-apps/api/core';
+
+  const flog = (msg: string) => invoke('log_debug', { msg }).catch(() => {});
   import { listenForCmdAutoResult, listenForCmdConfirm, listenForCmdPreview } from '../api/tools';
   import type { PendingExecutionEvent } from '../api/tools';
   import MessageBubble from './MessageBubble.svelte';
@@ -28,7 +31,9 @@
   let unlisteners: Array<() => void> = [];
 
   // Derived: active conversation messages
-  $: activeMessages = $conversation.active ? $conversation.active.messages : [];
+  $: activeMessages = $conversation.activeId
+    ? $conversation.conversations.find((c) => c.id === $conversation.activeId)?.messages ?? []
+    : [];
   $: streaming = $conversation.streaming;
 
   // ── Auto-scroll ─────────────────────────────────────────────────────────
@@ -62,6 +67,7 @@
 
   async function handleSend() {
     const text = inputValue.trim();
+    await flog(`handleSend called, text="${text.substring(0, 50)}", streaming=${streaming}, activeId=${$conversation.activeId}`);
     if (!text || streaming) return;
 
     inputValue = '';
@@ -69,20 +75,28 @@
 
     // Optimistically add user message
     conversation.appendMessage({ role: 'user', content: text });
+    const activeConv = $conversation.conversations.find(c => c.id === $conversation.activeId);
+    await flog(`after appendMessage, activeMessages.length=${activeConv?.messages.length}`);
     conversation.setStreaming(true);
+    await flog(`after setStreaming(true), streaming=${$conversation.streaming}`);
 
     try {
       // Set up event listeners for this send
+      await flog('before listenForTokens');
       const tokenUnlisten = await listenForTokens((token) => {
         conversation.appendToken(token);
       });
+      await flog('after listenForTokens');
 
+      await flog('before listenForDone');
       const doneUnlisten = await listenForDone((_fullResponse) => {
         conversation.setStreaming(false);
         tokenUnlisten();
         doneUnlisten();
       });
+      await flog('after listenForDone');
 
+      await flog('before listenForError');
       const errorUnlisten = await listenForError((error) => {
         conversation.setStreaming(false);
         conversation.appendMessage({
@@ -92,14 +106,27 @@
         tokenUnlisten();
         errorUnlisten();
       });
+      await flog('after listenForError');
 
       // Store for cleanup
       unlisteners.push(tokenUnlisten, doneUnlisten, errorUnlisten);
 
       // Send the message via IPC
-      const activeId = $conversation.active?.id;
-      await sendMessage(text, activeId);
+      const activeId = $conversation.activeId;
+      await flog(`before sendMessage invoke, activeId=${activeId}`);
+      const result = await sendMessage(text, activeId);
+      await flog(`after sendMessage invoke, result=${result}`);
+
+      // If the backend returned a different conversation ID than we sent,
+      // update the store so subsequent messages append to the same
+      // backend conversation (e.g. first message where the backend
+      // auto-created a new conversation with a UUID).
+      if (result && result !== activeId) {
+        conversation.switchConversation(result);
+        await flog(`switched to conversation id=${result}`);
+      }
     } catch (err) {
+      await flog(`CATCH: ${err}`);
       conversation.setStreaming(false);
       conversation.appendMessage({
         role: 'assistant',
@@ -212,7 +239,13 @@
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </div>
-        <h2 class="empty-title">Ask me anything, che</h2>
+        <h2
+          class="empty-title"
+          role="button"
+          tabindex="-1"
+          on:click={() => inputElement?.focus()}
+          on:keydown={(e) => e.key === 'Enter' && inputElement?.focus()}
+        >Ask me anything, che</h2>
         <p class="empty-subtitle">
           Send a message or press <kbd>Ctrl+N</kbd> to start a new conversation.
         </p>
@@ -277,6 +310,7 @@
         rows="1"
         disabled={streaming}
         class:input-disabled={streaming}
+        autofocus
         aria-label="Message input"
       ></textarea>
 

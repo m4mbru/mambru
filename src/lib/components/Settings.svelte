@@ -584,7 +584,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
                       type="text"
                       placeholder="e.g. {app}, --new-window"
                       on:change={(e) => {
-                        const val = (e.target as HTMLInputElement).value;
+                        const val = (e.target).value;
                         newCommandAction.args = val ? val.split(',').map(a => a.trim()) : [];
                       }}
                     />

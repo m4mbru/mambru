@@ -1,12 +1,10 @@
-use std::sync::Mutex;
-
 use futures::StreamExt;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::Mutex;
 
 use crate::conversation::history::ConversationSummary;
 use crate::llm::provider::{ChatRequest, Message};
 use crate::security::{AuditLog, RiskClassifier, RiskTier};
-use crate::tools::commands::ExecResult;
 use crate::tools::CommandExecutor;
 use crate::AppState;
 
@@ -15,6 +13,26 @@ use super::tools::PendingExecution;
 // ---------------------------------------------------------------------------
 // Chat IPC commands
 // ---------------------------------------------------------------------------
+
+/// Simple file logger for chat debugging (since stdout/stderr are hidden
+/// in release builds with windows_subsystem = "windows").
+fn log_chat(msg: &str) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(r"C:\Users\JAJKA\AppData\Roaming\com.mambru.desktop\mambru-chat.log")
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "[{}] {msg}", chrono::Local::now().format("%H:%M:%S"));
+    }
+}
+
+/// Debug command: logs a message from the frontend to our chat log.
+#[tauri::command]
+pub async fn log_debug(msg: String) -> Result<(), String> {
+    log_chat(&format!("[FRONTEND] {msg}"));
+    Ok(())
+}
 
 /// Send a message and stream the response token-by-token via Tauri events.
 ///
@@ -52,11 +70,23 @@ pub async fn send_message(
     content: String,
     conversation_id: Option<String>,
 ) -> Result<String, String> {
+    log_chat(&format!("send_message ENTERED: content.len()={}, conversation_id={:?}", content.len(), conversation_id));
+
+    // HOLD ON — test if we can acquire the lock
+    log_chat("  about to acquire state lock...");
+    let state_lock = state.inner().lock().await;
+    log_chat("  state lock acquired");
+    // We'll hold it for a brief check, then drop
+    drop(state_lock);
+    log_chat("  state lock released");
+
     // ===================================================================
     // STEP 1: Check if the message matches a custom command
     // ===================================================================
     {
-        let state_lock = state.lock().map_err(|e| e.to_string())?;
+        log_chat("  step1: acquiring lock for command matching...");
+        let state_lock = state.inner().lock().await;
+        log_chat("  step1: lock acquired");
         if let Some(command_match) = state_lock.command_matcher.match_text(&content) {
             let effective_risk = command_match.command.risk.clone();
 
@@ -71,6 +101,7 @@ pub async fn send_message(
                     // Auto-execute immediately
                     drop(state_lock);
                     let result = CommandExecutor::execute(
+                        Some(&app),
                         &command_match.command.action,
                         &command_match.params,
                         &effective_risk,
@@ -128,7 +159,7 @@ pub async fn send_message(
                     // drop it first and re-acquire
                     // Actually, we can add to a temporary holder
                     drop(state_lock);
-                    let mut sl = state.lock().map_err(|e| e.to_string())?;
+                    let mut sl = state.inner().lock().await;
                     sl.pending_executions.insert(pending_id.clone(), pending);
 
                     let event_name = match effective_risk {
@@ -162,29 +193,31 @@ pub async fn send_message(
     // STEP 2: No command matched — proceed with LLM chat as normal
     // ===================================================================
 
-    // Resolve the conversation ID — use existing or create new
-    let conv_id = {
-        let state_lock = state.lock().map_err(|e| e.to_string())?;
-        match conversation_id {
-            Some(id) if state_lock.has_conversation(&id) => id,
-            Some(id) => {
-                // ID provided but not found — create it
+    // Resolve the conversation ID — use existing or create new.
+    //
+    // IMPORTANT: acquire the lock only ONCE per operation — tokio::sync::Mutex
+    // is NOT re-entrant. Re-locking while held deadlocks the task.
+    let conv_id = match conversation_id {
+        Some(id) => {
+            let state_lock = state.inner().lock().await;
+            if state_lock.has_conversation(&id) {
+                id
+            } else {
+                // ID provided but conversation not found — create a new one
                 drop(state_lock);
-                let mut s = state.lock().map_err(|e| e.to_string())?;
-                let new_id = s.new_conversation(None);
-                // Update the caller's ID so history is consistent
-                new_id
-            }
-            None => {
-                let mut s = state.lock().map_err(|e| e.to_string())?;
+                let mut s = state.inner().lock().await;
                 s.new_conversation(None)
             }
+        }
+        None => {
+            let mut s = state.inner().lock().await;
+            s.new_conversation(None)
         }
     };
 
     // Build the message list: system prompt + history + new message
     let messages = {
-        let state_lock = state.lock().map_err(|e| e.to_string())?;
+        let state_lock = state.inner().lock().await;
         let config = state_lock.settings();
         let system_prompt = crate::conversation::resolve_system_prompt(
             &config.personality.preset,
@@ -211,7 +244,7 @@ pub async fn send_message(
 
     // Save user message to history
     {
-        let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+        let mut state_lock = state.inner().lock().await;
         state_lock.append_message(
             &conv_id,
             Message {
@@ -222,43 +255,67 @@ pub async fn send_message(
     }
 
     // Build the chat request
+    //
+    // FIXME: streaming is disabled for now — reqwest's bytes_stream() on
+    // Windows returns 0 tokens with Ollama's SSE. Once we figure out the
+    // cause, switch back to stream: true and use the streaming_chat path.
     let request = ChatRequest {
         messages,
         model: None,
         temperature: None,
         max_tokens: None,
-        stream: true,
+        stream: false,
     };
 
-    // Get the provider and call chat
-    let mut stream = {
-        let state_lock = state.lock().map_err(|e| e.to_string())?;
+    // Acquire provider.chat() — the lock is held during the HTTP request to
+    // Ollama. This is NOT ideal (it blocks other state access), but is
+    // acceptable for now. The real fix would store the provider behind a
+    // separate Arc so it can be used lock-free.
+    //
+    // NOTE: each lock acquisition below drops the previous guard before
+    // acquiring a new one — tokio::sync::Mutex is NOT re-entrant.
+    log_chat("calling provider.chat()...");
+    let mut stream = match {
+        let state_lock = state.inner().lock().await;
         let provider = state_lock.provider();
-        provider
-            .chat(request)
-            .await
-            .map_err(|e| e.to_string())?
+        provider.chat(request).await
+    } {
+        Ok(s) => {
+            log_chat("provider.chat() OK — streaming");
+            s
+        }
+        Err(e) => {
+            let err_msg = format!("provider.chat() FAILED: {e}");
+            log_chat(&err_msg);
+            let _ = app.emit("chat-error", &err_msg);
+            return Err(err_msg);
+        }
     };
 
     // Stream tokens via events
+    log_chat("starting token stream");
     let mut full_response = String::new();
+    let mut token_count = 0;
     while let Some(result) = stream.next().await {
         match result {
             Ok(token) => {
+                token_count += 1;
                 full_response += &token;
                 app.emit("chat-token", &token).map_err(|e| e.to_string())?;
             }
             Err(e) => {
-                let err_msg = e.to_string();
+                let err_msg = format!("stream error: {e}");
+                log_chat(&err_msg);
                 let _ = app.emit("chat-error", &err_msg);
                 return Err(err_msg);
             }
         }
     }
+    log_chat(&format!("stream done — {token_count} tokens, {} chars", full_response.len()));
 
     // Save assistant response to history
     {
-        let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+        let mut state_lock = state.inner().lock().await;
         state_lock.append_message(
             &conv_id,
             Message {
@@ -280,7 +337,7 @@ pub async fn send_message(
 pub async fn get_history(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<Vec<ConversationSummary>, String> {
-    let state_lock = state.lock().map_err(|e| e.to_string())?;
+    let state_lock = state.inner().lock().await;
     Ok(state_lock.list_conversations())
 }
 
@@ -289,7 +346,7 @@ pub async fn get_history(
 pub async fn new_conversation(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<String, String> {
-    let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+    let mut state_lock = state.inner().lock().await;
     Ok(state_lock.new_conversation(None))
 }
 
@@ -299,7 +356,7 @@ pub async fn delete_conversation(
     state: State<'_, Mutex<AppState>>,
     id: String,
 ) -> Result<(), String> {
-    let mut state_lock = state.lock().map_err(|e| e.to_string())?;
+    let mut state_lock = state.inner().lock().await;
     if state_lock.delete_conversation(&id) {
         Ok(())
     } else {

@@ -11,7 +11,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -62,14 +62,23 @@ pub struct VadEngine {
 impl VadEngine {
     /// Create a new VAD engine with the given configuration.
     pub fn new(config: VadConfig) -> Result<Self> {
-        let sample_rate = webrtc_vad::VadSampleRate::from(config.sample_rate)
-            .context("unsupported sample rate for VAD")?;
+        let sample_rate = match config.sample_rate {
+            8000 => webrtc_vad::SampleRate::Rate8kHz,
+            16000 => webrtc_vad::SampleRate::Rate16kHz,
+            32000 => webrtc_vad::SampleRate::Rate32kHz,
+            48000 => webrtc_vad::SampleRate::Rate48kHz,
+            _ => anyhow::bail!("unsupported sample rate for VAD: {}", config.sample_rate),
+        };
 
-        let mut inner = webrtc_vad::Vad::new(sample_rate);
-        inner.set_mode(
-            webrtc_vad::VadAggressiveness::from(config.mode)
-                .context("invalid VAD aggressiveness mode")?,
-        );
+        let mut inner = webrtc_vad::Vad::new_with_rate(sample_rate);
+        let mode = match config.mode {
+            0 => webrtc_vad::VadMode::Quality,
+            1 => webrtc_vad::VadMode::LowBitrate,
+            2 => webrtc_vad::VadMode::Aggressive,
+            3 => webrtc_vad::VadMode::VeryAggressive,
+            _ => anyhow::bail!("invalid VAD aggressiveness mode: {}", config.mode),
+        };
+        inner.set_mode(mode);
 
         let frame_samples = (config.sample_rate as usize)
             * (config.frame_ms as usize)
@@ -113,19 +122,14 @@ impl VadEngine {
             frame
         };
 
-        self.inner.is_voice_segment(&frame)
+        self.inner.is_voice_segment(&frame).unwrap_or(false)
     }
 
     /// Reset VAD internal state (call between capture sessions).
     pub fn reset(&mut self) {
-        // `webrtc-vad` doesn't expose a reset — re-create the inner instance.
-        if let Ok(sample_rate) = webrtc_vad::VadSampleRate::from(self.config.sample_rate) {
-            let mut inner = webrtc_vad::Vad::new(sample_rate);
-            if let Ok(mode) = webrtc_vad::VadAggressiveness::from(self.config.mode) {
-                inner.set_mode(mode);
-            }
-            self.inner = inner;
-        }
+        // `webrtc-vad` 0.4 has a built-in `reset()` that clears state
+        // while keeping the sample rate and mode configuration.
+        self.inner.reset();
     }
 
     /// Enable or disable VAD processing.
@@ -142,6 +146,19 @@ impl VadEngine {
         self.frame_samples
     }
 }
+
+// ---------------------------------------------------------------------------
+// Safety: Send + Sync for VadEngine
+// ---------------------------------------------------------------------------
+
+// webrtc_vad::Vad wraps a raw `*mut Fvad` pointer and does not implement
+// Send / Sync.  All public methods on VadEngine that touch the inner Vad
+// take `&mut self`, so Rust's borrow checker already guarantees exclusive
+// access at compile time — concurrent calls are a compile error.  The only
+// method taking `&self` (`set_enabled`) touches only an AtomicBool and
+// never the inner Vad, so adding Send + Sync here is sound.
+unsafe impl Send for VadEngine {}
+unsafe impl Sync for VadEngine {}
 
 // ---------------------------------------------------------------------------
 // Helpers

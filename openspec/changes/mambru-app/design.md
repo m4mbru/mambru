@@ -31,6 +31,42 @@ Stack rationale per exploration.md: Rust for audio/LLM/security, Svelte for reac
 ### Decision: Three-tier risk classification, not binary
 **Rationale**: Binary safe/dangerous forces users to choose between annoyance and risk. Three tiers (auto / confirm / approve+preview) let the user calibrate trust per command.
 
+### Decision: Direct reqwest for LLM providers (not ollama-rs or llm crate)
+| Option | Tradeoff | Choice |
+|--------|----------|--------|
+| `ollama-rs` crate | Extra dep, limited to Ollama, stale | |
+| `llm` crate (0.3) | Heavy, includes model loading, not needed for API calls | |
+| Direct `reqwest` | Minimal dep, full control, works for any REST API | **Yes** |
+**Rationale**: Both `ollama-rs` and the `llm` crate add transitive weight and maintenance burden. Direct `reqwest` calls to Ollama/OpenAI/Anthropic APIs are simple, testable, and give complete control over the HTTP layer.
+
+### Decision: WebRTC VAD over Silero VAD
+| Option | Tradeoff | Choice |
+|--------|----------|--------|
+| `silero-vad-rs` | No published crate on crates.io, would need git dep | |
+| `webrtc-vad` | Published crate, battle-tested, minimal API | **Yes** |
+**Rationale**: Silero has no published Rust crate. `webrtc-vad` wraps Google's production VAD — proven in WebRTC. Sufficient for silence trimming in PTT mode.
+
+### Decision: Subprocess Piper TTS (no piper-rs crate)
+| Option | Tradeoff | Choice |
+|--------|----------|--------|
+| `piper-rs` | Does not exist on crates.io | |
+| Subprocess `piper` binary | Requires binary on PATH, but no crate dependency | **Yes** |
+**Rationale**: Piper TTS has no Rust crate. The subprocess approach calls the `piper` command-line tool, captures raw PCM on stdout, and wraps it in a WAV header for rodio playback. Simple, zero additional deps.
+
+### Decision: Model download via Tauri IPC events (not bundled)
+| Option | Tradeoff | Choice |
+|--------|----------|--------|
+| Bundle models in installer | 50-150MB per install, platform-specific packaging | |
+| Download on first launch | Requires internet at first use, but smaller bundle | **Yes** |
+**Rationale**: See ADR 1 in the fix-rust-backend design. Tauri IPC events for progress follow the same pattern as `llm:token` streaming.
+
+### Decision: Local whisper-rs-sys patch for MinGW compatibility
+| Option | Tradeoff | Choice |
+|--------|----------|--------|
+| Wait for upstream fix | Zero maintenance, no timeline | |
+| Local Cargo patch | Immediate fix, must maintain fork | **Yes** |
+**Rationale**: `whisper-rs-sys/build.rs` adds `/utf-8` MSVC flag unconditionally on all Windows targets. MinGW `gcc` rejects this flag. The local patch in `src-tauri/patches/whisper-rs-sys/` guards the flag with `#[cfg(not(target_env = "gnu"))]`. See fix-rust-backend design for details.
+
 ## Data Flow
 
 ### Chat Flow
@@ -46,11 +82,11 @@ Svelte input → invoke("send_message", { text })
 ### Voice Flow
 ```
 PTT hold → cpal capture (100ms chunks)
-  → Silero VAD trims silence
-  → PTT release → whisper.cpp transcribe
+  → WebRTC VAD trims silence (via webrtc-vad crate)
+  → PTT release → whisper.cpp transcribe (via whisper-rs crate)
   → transcribed text injected as user message
   → normal chat flow → TTS on response end
-  → Piper TTS → rodio playback
+  → Piper TTS (subprocess) → rodio playback
 ```
 
 ### Command Flow
@@ -74,6 +110,19 @@ LLM determines search needed
   → LLM summarizes → stream to chat
 ```
 
+### Model Download Flow
+```
+App startup → invoke("check_models")
+  → scan {app_data_dir}/models/whisper/, {app_data_dir}/models/piper/
+  → returns HashMap<ModelKind, ModelState>
+  → if all Ready: normal startup
+  → if any Missing: frontend shows DownloadDialog.svelte
+  → user clicks Download → invoke("start_download", kind)
+  → reqwest streaming GET → emit("model:progress") events
+  → on complete: extract .tar.gz (Piper), verify size, emit("model:done")
+  → frontend updates store → dialog closes when all done → voice enabled
+```
+
 ## Interfaces / Contracts
 
 ```rust
@@ -82,11 +131,10 @@ LLM determines search needed
 trait LLMProvider: Send + Sync {
     async fn chat(
         &self,
-        messages: Vec<Message>,
-        cancel: CancellationToken,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<Delta>> + Send>>>;
+        request: ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, LlmError>> + Send>>>;
 
-    fn config(&self) -> ProviderConfig;
+    fn name(&self) -> &'static str;
 }
 
 // Command registry — matches + executes
@@ -107,6 +155,16 @@ impl RiskClassifier {
     fn validate_args(cmd: &Command, params: &[String]) -> Result<()>;
 }
 
+// Voice pipeline
+enum ModelKind { Whisper, Piper }
+enum ModelState { Missing, Downloading { bytes: u64, total: u64 }, Ready, Failed(String) }
+
+#[tauri::command]
+async fn check_models(app: AppHandle) -> Result<HashMap<ModelKind, ModelState>>;
+
+#[tauri::command]
+async fn start_download(app: AppHandle, kind: ModelKind) -> Result<()>;
+
 // IPC command signatures (Tauri)
 #[tauri::command]
 async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<()>;
@@ -118,7 +176,7 @@ async fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<
 async fn start_voice_capture(app: AppHandle, state: State<'_, AppState>) -> Result<()>;
 
 #[tauri::command]
-async fn stop_voice_capture(state: State<'_, AppState>) -> Result<String>;
+async fn stop_voice_capture(app: AppHandle, state: State<'_, AppState>) -> Result<String>;
 
 #[tauri::command]
 async fn get_commands(state: State<'_, AppState>) -> Result<Vec<Command>>;
@@ -127,22 +185,24 @@ async fn get_commands(state: State<'_, AppState>) -> Result<Vec<Command>>;
 async fn save_command(state: State<'_, AppState>, cmd: Command) -> Result<()>;
 ```
 
-## File Changes (all new — greenfield)
+## File Changes
 
 | File | Action | Description |
 |------|--------|-------------|
-| `src-tauri/Cargo.toml` | Create | Dependencies: tauri v2, serde, reqwest, tokio, llm, whisper-rs, piper-rs, cpal, rodio, notify |
+| `src-tauri/Cargo.toml` | Create | Dependencies: tauri v2, serde, reqwest, tokio, whisper-rs, webrtc-vad, cpal, rodio, notify |
 | `src-tauri/tauri.conf.json` | Create | App metadata, window config, capability permissions |
+| `src-tauri/build.rs` | Create | Tauri build hook |
 | `src-tauri/src/main.rs` | Create | Tauri entry: plugin registration, state init, invoke handlers |
 | `src-tauri/src/llm/mod.rs` | Create | LLMProvider trait, runtime, provider factory |
 | `src-tauri/src/llm/provider.rs` | Create | ProviderConfig, stream types, Delta struct |
-| `src-tauri/src/llm/ollama.rs` | Create | OllamaProvider via ollama-rs HTTP client |
-| `src-tauri/src/llm/openai.rs` | Create | CloudProvider for OpenAI/Anthropic via `llm` crate |
+| `src-tauri/src/llm/ollama.rs` | Create | OllamaProvider via direct reqwest HTTP client |
+| `src-tauri/src/llm/openai.rs` | Create | CloudProvider for OpenAI/Anthropic via direct reqwest |
 | `src-tauri/src/voice/mod.rs` | Create | VoicePipeline struct: capture → VAD → STT → TTS |
-| `src-tauri/src/voice/stt.rs` | Create | whisper.cpp binding, transcription |
-| `src-tauri/src/voice/vad.rs` | Create | Silero VAD for silence trimming |
-| `src-tauri/src/voice/tts.rs` | Create | Piper TTS generation + rodio playback |
-| `src-tauri/src/tools/mod.rs` | Create | Tool definitions, ToolCall enum |
+| `src-tauri/src/voice/stt.rs` | Create | whisper.cpp binding via whisper-rs, transcription |
+| `src-tauri/src/voice/vad.rs` | Create | WebRTC VAD for silence trimming (via webrtc-vad crate) |
+| `src-tauri/src/voice/tts.rs` | Create | Piper TTS (subprocess) generation + rodio playback |
+| `src-tauri/src/voice/download.rs` | Create | Model download module: check_models, start_download, progress events, tar.gz extraction |
+| `src-tauri/src/tools/mod.rs` | Create | Tool definitions, ToolCall enum, SearchResult struct |
 | `src-tauri/src/tools/executor.rs` | Create | Shell exec via tauri-plugin-shell, result capture |
 | `src-tauri/src/tools/search.rs` | Create | Tavily/SerpAPI client with reqwest |
 | `src-tauri/src/tools/commands/mod.rs` | Create | Command type, serialization structs |
@@ -163,15 +223,34 @@ async fn save_command(state: State<'_, AppState>, cmd: Command) -> Result<()>;
 | `src/lib/components/VoiceControls.svelte` | Create | PTT button, recording indicator |
 | `src/lib/components/Settings.svelte` | Create | Multi-tab settings panel (provider, voice, commands, personality, theme) |
 | `src/lib/components/ConfirmationDialog.svelte` | Create | Modal for medium/dangerous command approval |
+| `src/lib/components/DownloadDialog.svelte` | Create | Modal for model download on first launch |
 | `src/lib/stores/conversation.ts` | Create | Svelte writable store for messages, active conversation |
 | `src/lib/stores/settings.ts` | Create | Reactive settings store, auto-save |
 | `src/lib/stores/voice.ts` | Create | Recording state, audio level indicator |
+| `src/lib/stores/models.ts` | Create | Model state store, listen for model:progress/model:done |
 | `src/lib/api/llm.ts` | Create | invoke("send_message"), listen("llm:token") wrappers |
 | `src/lib/api/voice.ts` | Create | invoke("start_voice_capture"), invoke("stop_voice_capture") |
 | `src/lib/api/tools.ts` | Create | invoke for command CRUD, search |
+| `src/lib/api/models.ts` | Create | invoke("check_models"), invoke("start_download") wrappers |
 | `src/main.ts` | Create | Svelte mount point |
 | `src/app.css` | Create | Base styles, theme variables |
 | `package.json` | Create | Svelte, svelte-markdown, highlight.js, TypeScript deps |
+
+## Key Crates
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `whisper-rs` | 0.16 (patched) | Whisper.cpp bindings for local STT |
+| `webrtc-vad` | =0.4.10 | Voice activity detection for silence trimming |
+| `cpal` | 0.15 | Cross-platform audio capture |
+| `rodio` | 0.19 | Audio playback for TTS output |
+| `reqwest` | 0.12 | HTTP client for LLM APIs, model download, web search |
+| `tar` | 0.4 | Archive extraction for Piper model `.tar.gz` |
+| `flate2` | 1 | Gzip decompression for model archives |
+| `tauri` | 2 | Desktop app framework |
+| `serde` / `toml` | 1 / 0.8 | Configuration serialization |
+
+> **Note**: `whisper-rs` and `whisper-rs-sys` are locally patched via `[patch.crates-io]` in `Cargo.toml` for MinGW GCC compatibility. See the "Local whisper-rs-sys patch for MinGW compatibility" ADR above.
 
 ## Configuration Design
 
@@ -224,6 +303,10 @@ action = { type = "exec", command = "start", args = ["{app}"] }
 risk = "safe"
 ```
 
+## Model Download
+
+On first launch, the app checks for Whisper and Piper models in `{app_data_dir}/models/`. If any are missing, the frontend shows a `DownloadDialog.svelte` modal listing each missing model with name, size, and status. The user can click "Download" to start sequential downloads with per-model progress, or "Skip — text only" to proceed without voice features. Download uses `reqwest` streaming, emits `model:progress` and `model:done` Tauri events, and extracts `.tar.gz` archives for Piper models. If a download fails, a retry option is shown per model. Partial files are cleaned up on cancel. Voice features degrade gracefully: missing Whisper hides the mic icon, missing Piper disables TTS. The dialog can be re-opened from Settings at any time.
+
 ## Testing Strategy
 
 | Layer | What to Test | Approach |
@@ -233,17 +316,19 @@ risk = "safe"
 | Unit (Rust) | RiskClassifier | Each tier maps correctly, arg validation blocks shell injection patterns |
 | Unit (Rust) | Settings load/save | Round-trip serde tests: valid TOML, malformed input, missing fields |
 | Unit (Rust) | Personality presets | Preset switching clears custom, empty falls back to default |
+| Unit (Rust) | Model state management | ModelKind/ModelState round-trip, state transitions |
 | Integration | IPC commands | Tauri test harness with `tauri::test`, mock state, verify event emission |
 | Integration | Voice pipeline (mock) | Feed WAV file → stub whisper → verify transcribed text appears |
 | Integration | Command execution | Mock tauri-plugin-shell, verify audit log entries |
-| Frontend | Svelte components | Vitest + @testing-library/svelte: Chat renders tokens, MessageBubble handles markdown, ConfirmDialog shows/hides |
-| Frontend | Store behaviour | Vitest: settings persist on write, conversation maintains history |
+| Integration | Model download | Mock reqwest response, verify progress/done events |
+| Frontend | Svelte components | Vitest + @testing-library/svelte: Chat renders tokens, MessageBubble handles markdown, ConfirmDialog shows/hides, DownloadDialog progress updates |
+| Frontend | Store behaviour | Vitest: settings persist on write, conversation maintains history, model state reacts to events |
 
-## Open Questions
+## Open Questions (Resolved)
 
-- [ ] **Whisper model download UX**: Download on first launch? Or ship with setup and prompt user? Needs bundling strategy.
-- [ ] **Piper model sourcing**: Same question — download at runtime or bundle? Piper models are 10-50MB each.
-- [ ] **Tauri plugin shell scope**: Exact allowlist for shell plugin in `tauri.conf.json` capabilities — needs careful definition per risk tier.
+- [x] **Whisper model download UX**: **Resolved** — Download on first launch via Tauri IPC events with progress. Not bundled. Models stored under `{app_data_dir}/models/whisper/`. See model-download spec and fix-rust-backend design for details.
+- [x] **Piper model sourcing**: **Resolved** — Same first-launch download pattern. Piper models extracted from `.tar.gz` to `{app_data_dir}/models/piper/`. Models are 10-50MB, downloaded on demand.
+- [x] **Tauri plugin shell scope**: **Resolved** — The shell plugin allowlist is defined per-command risk tier in `tauri.conf.json` capabilities. Medium commands require confirmation through `ConfirmationDialog`, dangerous commands require approval+preview. No unrestricted shell access.
 
 ## Next Step
 

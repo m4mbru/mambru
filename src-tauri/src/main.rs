@@ -1,3 +1,7 @@
+// Suppress console window in release builds — Tauri is a GUI app.
+// Debug builds keep the console for logging during development.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // Pre-declare all backend modules (stubs populated in later phases)
 mod commands;
 mod config;
@@ -11,7 +15,7 @@ mod voice;
 mod integration_tests;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use llm::provider::{LLMProvider, Message};
 
@@ -131,6 +135,14 @@ impl AppState {
 // Entry point
 // ---------------------------------------------------------------------------
 
+/// Compile-time assertion: AppState must be Send for thread-safe access
+/// via Mutex<AppState> and for async Tauri command handlers.
+#[allow(dead_code)]
+fn _assert_appstate_is_send() {
+    fn require_send<T: Send>() {}
+    require_send::<crate::AppState>();
+}
+
 fn main() {
     // Load persisted settings or fall back to defaults
     let initial_settings = config::settings::Settings::load().unwrap_or_default();
@@ -146,6 +158,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::chat::send_message,
+            commands::chat::log_debug,
             commands::chat::get_history,
             commands::chat::new_conversation,
             commands::chat::delete_conversation,
@@ -156,6 +169,8 @@ fn main() {
             commands::voice::toggle_tts,
             commands::voice::speak_text,
             commands::voice::get_voice_status,
+            commands::voice::check_models,
+            commands::voice::start_download,
             // Tools & Security (Phase 4)
             commands::tools::get_commands,
             commands::tools::save_command,

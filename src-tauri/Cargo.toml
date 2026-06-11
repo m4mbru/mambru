@@ -31,7 +31,7 @@ regex = "1"
 # NOTE: whisper-rs 0.13.2 stable, 0.14/0.16 also available.
 #       piper-rs doesn't exist as a crate — TTS uses subprocess-based PiperBackend.
 #       webrtc-vad replaces silero-vad-rs (not available on crates.io).
-whisper-rs = "0.13"
+whisper-rs = "0.16"
 webrtc-vad = "0.4"
 cpal = "0.15"
 rodio = "0.19"
@@ -43,3 +43,7 @@ rodio = "0.19"
 # ── Headless browsing (Phase 4) ──
 # headless_chrome = "1"
 # chromiumoxide = "0.7"
+
+[patch.crates-io]
+whisper-rs = { path = "patches/whisper-rs" }
+whisper-rs-sys = { path = "patches/whisper-rs-sys" }

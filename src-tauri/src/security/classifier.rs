@@ -42,6 +42,7 @@ impl RiskClassifier {
     ///
     /// If the command has an explicit `risk` other than the default, that
     /// value is honoured. Otherwise the action type determines the tier.
+    #[allow(dead_code)]
     pub fn classify(action: &crate::tools::commands::CommandAction) -> RiskTier {
         match action {
             // Shell execution is inherently Dangerous.
@@ -55,6 +56,7 @@ impl RiskClassifier {
 
     /// Classify a raw shell command string (used by [`super::CommandExecutor`]
     /// when executing inline shell commands).
+    #[allow(dead_code)]
     pub fn classify_shell(command: &str) -> RiskTier {
         let lower = command.to_lowercase();
         // Commands that only read or query are Safe.

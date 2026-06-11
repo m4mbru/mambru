@@ -66,11 +66,11 @@ impl SearchClient {
     async fn search_tavily(&self, query: &str) -> Result<Vec<SearchResult>, String> {
         let url = "https://api.tavily.com/search";
 
-        let mut body = HashMap::new();
-        body.insert("api_key", &self.api_key);
-        body.insert("query", query);
-        body.insert("max_results", &self.max_results.to_string());
-        body.insert("search_depth", "basic");
+        let mut body: HashMap<&str, String> = HashMap::new();
+        body.insert("api_key", self.api_key.clone());
+        body.insert("query", query.to_string());
+        body.insert("max_results", self.max_results.to_string());
+        body.insert("search_depth", "basic".to_string());
 
         let client = reqwest::Client::new();
         let response = client

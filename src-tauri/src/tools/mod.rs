@@ -18,12 +18,14 @@ pub mod search;
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
 
 use crate::security::RiskTier;
 
 pub use commands::*;
 pub use executor::CommandExecutor;
 pub use search::SearchClient;
+pub use search::SearchResult;
 
 // ---------------------------------------------------------------------------
 // ToolCall enum
@@ -68,9 +70,9 @@ pub struct ToolResult {
 
 impl ToolCall {
     /// Execute this tool call and return a [`ToolResult`].
-    pub async fn execute(&self) -> ToolResult {
+    pub async fn execute(&self, app: Option<&AppHandle>) -> ToolResult {
         match self {
-            ToolCall::Search { query } => {
+            ToolCall::Search { query: _ } => {
                 // Search requires a configured client; this will be wired
                 // through AppState at the call site. The standalone execute
                 // returns a placeholder message.
@@ -82,7 +84,7 @@ impl ToolCall {
                 }
             }
             ToolCall::Execute { action, params, risk } => {
-                match CommandExecutor::execute(action, params, risk).await {
+                match CommandExecutor::execute(app, action, params, risk).await {
                     Ok(result) => ToolResult {
                         tool: "execute".into(),
                         success: result.exit_code == 0,
@@ -158,7 +160,7 @@ mod tests {
             params: HashMap::new(),
             risk: RiskTier::Safe,
         };
-        let result = call.execute().await;
+        let result = call.execute(None).await;
         assert!(result.success, "echo hello should succeed");
         assert_eq!(result.tool, "execute");
     }
@@ -168,7 +170,7 @@ mod tests {
         let call = ToolCall::GetWeather {
             location: "Buenos Aires".into(),
         };
-        let result = call.execute().await;
+        let result = call.execute(None).await;
         assert!(result.success);
         assert!(result.output.contains("Buenos Aires"));
     }
@@ -178,7 +180,7 @@ mod tests {
         let call = ToolCall::Search {
             query: "test".into(),
         };
-        let result = call.execute().await;
+        let result = call.execute(None).await;
         assert!(!result.success);
         assert!(result.output.contains("not available"));
     }

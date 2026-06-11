@@ -28,7 +28,7 @@
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
     const $voice: any = {};
-    const unsub = voice.subscribe((v) => Object.assign($voice, v))();
+    const unsub = voice.subscribe((v) => Object.assign($voice, v));
     unsub();
 
     if (e.key.toUpperCase() === $voice.pttKey?.toUpperCase() && $voice.sttAvailable && !$voice.isRecording) {
@@ -39,7 +39,7 @@
 
   function handleKeyUp(e: KeyboardEvent) {
     const $voice: any = {};
-    const unsub = voice.subscribe((v) => Object.assign($voice, v))();
+    const unsub = voice.subscribe((v) => Object.assign($voice, v));
     unsub();
 
     if (e.key.toUpperCase() === $voice.pttKey?.toUpperCase() && pttPressed) {
@@ -92,7 +92,7 @@
 
   function handleMouseDown() {
     const $voice: any = {};
-    const unsub = voice.subscribe((v) => Object.assign($voice, v))();
+    const unsub = voice.subscribe((v) => Object.assign($voice, v));
     unsub();
     if ($voice.sttAvailable && !$voice.isRecording) {
       startPttCapture();

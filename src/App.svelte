@@ -2,12 +2,15 @@
   import { onMount, onDestroy } from 'svelte';
   import { settings } from './lib/stores/settings';
   import { conversation } from './lib/stores/conversation';
+  import { hasMissing, init as initModels, destroy as destroyModels } from './lib/stores/models';
   import Chat from './lib/components/Chat.svelte';
   import Settings from './lib/components/Settings.svelte';
+  import DownloadDialog from './lib/components/DownloadDialog.svelte';
 
   // ── State ───────────────────────────────────────────────────────────────
 
   let settingsOpen = false;
+  let showDownloadDialog = false;
   let conversationSearch = '';
 
   // Derived: side conversations for the sidebar
@@ -58,12 +61,17 @@
   // ── Lifecycle ───────────────────────────────────────────────────────────
 
   onMount(async () => {
+    // Initialise the conversation store IMMEDIATELY (before settings load)
+    conversation.init();
+    applyTheme('dark');
+
     // Load persisted settings on startup
     await settings.load();
     applyTheme($settings.appearance.theme);
 
-    // Initialise the conversation store with a blank conversation
-    conversation.init();
+    // Check model availability and show download dialog if models are missing
+    await initModels();
+    showDownloadDialog = $hasMissing;
 
     // Register keyboard shortcuts
     document.addEventListener('keydown', handleKeydown);
@@ -71,6 +79,7 @@
 
   onDestroy(() => {
     document.removeEventListener('keydown', handleKeydown);
+    destroyModels();
   });
 
   // ── Error boundary ──────────────────────────────────────────────────────
@@ -272,6 +281,9 @@
 
   <!-- Settings panel (slideover) -->
   <Settings open={settingsOpen} onClose={() => (settingsOpen = false)} />
+
+  <!-- Model download dialog (shown on first launch when models are missing) -->
+  <DownloadDialog show={showDownloadDialog} onSkip={() => (showDownloadDialog = false)} />
 {/if}
 
 <style>
