@@ -171,6 +171,8 @@ fn main() {
             commands::voice::get_voice_status,
             commands::voice::check_models,
             commands::voice::start_download,
+            commands::voice::start_continuous_capture,
+            commands::voice::stop_continuous_capture,
             // Tools & Security (Phase 4)
             commands::tools::get_commands,
             commands::tools::save_command,

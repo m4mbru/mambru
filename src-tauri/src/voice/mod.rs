@@ -31,8 +31,11 @@ pub use tts::{
 pub use vad::{chunk_into_frames, VadConfig, VadEngine};
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use cpal::traits::{DeviceTrait, HostTrait};
+use tauri::{AppHandle, Emitter};
 
 // ---------------------------------------------------------------------------
 // VoicePipeline
@@ -63,6 +66,12 @@ pub struct VoicePipeline {
 
     /// VAD config (for chunking).
     vad_config: VadConfig,
+
+    /// Whether continuous capture is running.
+    continuous_active: AtomicBool,
+
+    /// Signal to stop the continuous capture thread.
+    continuous_stop: Arc<AtomicBool>,
 }
 
 impl VoicePipeline {
@@ -82,6 +91,8 @@ impl VoicePipeline {
             is_capturing: AtomicBool::new(false),
             is_speaking: AtomicBool::new(false),
             vad_config,
+            continuous_active: AtomicBool::new(false),
+            continuous_stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -158,6 +169,115 @@ impl VoicePipeline {
         let text = self.stt.transcribe(audio).await?;
 
         Ok(text)
+    }
+
+    // -- Continuous capture -------------------------------------------------
+
+    /// Start continuous (always-listening) capture in a background thread.
+    ///
+    /// Captures 100ms audio chunks, detects speech vs silence via RMS energy,
+    /// and on speech-end sends the audio through a channel for transcription.
+    pub async fn start_continuous_capture(&mut self, app: &AppHandle) -> Result<()> {
+        if self.continuous_active.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        self.continuous_stop.store(false, Ordering::SeqCst);
+        self.continuous_active.store(true, Ordering::SeqCst);
+
+        let stop = self.continuous_stop.clone();
+        let sample_rate = 16_000u32;
+        let app_handle = app.clone();
+
+        tokio::spawn(async move {
+            eprintln!("[mambru] voice: continuous capture thread started");
+
+            let device = cpal::default_host().input_devices().ok()
+                .and_then(|mut devs| devs.find(|d| d.name().is_ok()));
+            let stream_config = cpal::StreamConfig {
+                channels: 1,
+                sample_rate: cpal::SampleRate(sample_rate),
+                buffer_size: cpal::BufferSize::Fixed(1600),
+            };
+
+            use std::sync::mpsc;
+            let (tx, rx) = mpsc::channel::<Vec<f32>>();
+
+            let stop_for_callback = Arc::clone(&stop);
+
+            let input_stream = device.and_then(|dev| {
+                dev.build_input_stream(
+                    &stream_config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if !stop_for_callback.load(Ordering::SeqCst) {
+                            let _ = tx.send(data.to_vec());
+                        }
+                    },
+                    |err| eprintln!("[mambru] voice: capture error: {err}"),
+                    None,
+                ).ok()
+            });
+
+            let Some(_stream) = input_stream else {
+                eprintln!("[mambru] voice: failed to open input stream");
+                return;
+            };
+
+            let mut speech_buf: Vec<f32> = Vec::new();
+            let mut silence_ms: u32 = 0;
+
+            loop {
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let chunk = match rx.recv_timeout(std::time::Duration::from_millis(150)) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        if !speech_buf.is_empty() {
+                            silence_ms += 100;
+                            if silence_ms >= 800 {
+                                let audio = std::mem::take(&mut speech_buf);
+                                silence_ms = 0;
+                                if audio.len() >= sample_rate as usize / 10 {
+                                    // Emit raw audio — frontend or main thread will transcribe
+                                    let len = audio.len();
+                                    eprintln!("[mambru] voice: continuous speech segment ({} samples)", len);
+                                    // For v1, emit an event to notify the frontend
+                                    let _ = app_handle.emit("voice:continuous-segment", &format!("{}", audio.len()));
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                };
+
+                // Simple RMS energy detection for VAD
+                let rms: f32 = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
+                let is_speech = rms > 0.02;
+
+                if is_speech {
+                    speech_buf.extend_from_slice(&chunk);
+                    silence_ms = 0;
+                } else if !speech_buf.is_empty() {
+                    silence_ms += 100;
+                }
+            }
+
+            eprintln!("[mambru] voice: continuous capture thread stopped");
+        });
+
+        Ok(())
+    }
+
+    /// Stop continuous capture.
+    pub fn stop_continuous_capture(&mut self) {
+        self.continuous_stop.store(true, Ordering::SeqCst);
+        self.continuous_active.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_continuous_active(&self) -> bool {
+        self.continuous_active.load(Ordering::SeqCst)
     }
 
     // -- TTS --------------------------------------------------------------

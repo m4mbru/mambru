@@ -19,6 +19,8 @@ export interface VoiceState {
   lastTranscription: string;
   /** Any voice-related error message (empty string if none). */
   error: string;
+  /** Whether continuous capture mode is active. */
+  continuousMode: boolean;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────
@@ -32,6 +34,7 @@ const initialState: VoiceState = {
   ttsAvailable: false,
   lastTranscription: '',
   error: '',
+  continuousMode: true,
 };
 
 /**
@@ -110,4 +113,11 @@ export function updateAvailability(
     sttAvailable: sttAvail,
     ttsAvailable: ttsAvail,
   }));
+}
+
+/**
+ * Toggle between continuous and PTT capture mode.
+ */
+export function setContinuousMode(enabled: boolean): void {
+  voice.update((s) => ({ ...s, continuousMode: enabled }));
 }

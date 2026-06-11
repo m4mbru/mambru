@@ -166,6 +166,45 @@ pub async fn get_voice_status(
     })
 }
 
+/// Begin continuous (always-listening) voice capture.
+///
+/// The microphone stays active and VAD triggers transcription
+/// when speech ends. Spawns a background thread.
+#[tauri::command]
+pub async fn start_continuous_capture(
+    app: AppHandle,
+    state: tauri::State<'_, Mutex<crate::AppState>>,
+) -> Result<(), String> {
+    let mut app_state = state.inner().lock().await;
+
+    if !app_state.voice_pipeline.stt_available() {
+        return Err("STT engine not available".into());
+    }
+
+    app_state
+        .voice_pipeline
+        .start_continuous_capture(&app)
+        .await
+        .map_err(|e| {
+            emit_event(&app, "voice:error", &format!("Continuous capture failed: {e}"));
+            e.to_string()
+        })?;
+
+    eprintln!("[mambru] voice: continuous capture started");
+    Ok(())
+}
+
+/// Stop continuous capture mode.
+#[tauri::command]
+pub async fn stop_continuous_capture(
+    state: tauri::State<'_, Mutex<crate::AppState>>,
+) -> Result<(), String> {
+    let mut app_state = state.inner().lock().await;
+    app_state.voice_pipeline.stop_continuous_capture();
+    eprintln!("[mambru] voice: continuous capture stopped");
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------

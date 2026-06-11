@@ -31,6 +31,13 @@ export interface AppearanceConfig {
   theme: string;
 }
 
+export interface HologramConfig {
+  enabled: boolean;
+  style: string;
+  size: number;
+  position: string;
+}
+
 export interface PersonalityConfig {
   preset: string;
   custom_prompt: string;
@@ -47,6 +54,7 @@ export interface Settings {
   appearance: AppearanceConfig;
   personality: PersonalityConfig;
   search: SearchConfig;
+  hologram: HologramConfig;
 }
 
 // ── Defaults ──────────────────────────────────────────────────────────────
@@ -63,6 +71,7 @@ function defaultSettings(): Settings {
     appearance: { theme: 'dark' },
     personality: { preset: 'default', custom_prompt: '' },
     search: { provider: 'tavily', api_key: '' },
+    hologram: { enabled: true, style: 'sphere', size: 200, position: 'floating' },
   };
 }
 

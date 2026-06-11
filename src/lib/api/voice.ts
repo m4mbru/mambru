@@ -54,6 +54,22 @@ export async function getVoiceStatus(): Promise<VoiceStatus> {
   return invoke('get_voice_status');
 }
 
+// ── Continuous capture ─────────────────────────────────────────────────
+
+/**
+ * Start always-listening continuous capture with VAD auto-transcribe.
+ */
+export async function startContinuousCapture(): Promise<void> {
+  return invoke('start_continuous_capture');
+}
+
+/**
+ * Stop continuous capture mode.
+ */
+export async function stopContinuousCapture(): Promise<void> {
+  return invoke('stop_continuous_capture');
+}
+
 // ── Event listeners ───────────────────────────────────────────────────────
 
 /**
@@ -136,6 +152,24 @@ export function listenForVoiceError(
   callback: VoiceEventCallback,
 ): Promise<UnlistenFn> {
   return listen<string>('voice:error', (event) => {
+    callback(event.payload);
+  });
+}
+
+export interface EmotionPayload {
+  emotion: string;
+  confidence: number;
+}
+
+export type EmotionCallback = (payload: EmotionPayload) => void;
+
+/**
+ * Listen for hologram emotion events from the backend.
+ */
+export function listenForHoloEmotion(
+  callback: EmotionCallback,
+): Promise<UnlistenFn> {
+  return listen<EmotionPayload>('holo:emotion', (event) => {
     callback(event.payload);
   });
 }

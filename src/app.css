@@ -51,6 +51,12 @@
   --settings-width: 420px;
   --radius-full: 9999px;
 
+  /* Hologram avatar tokens */
+  --color-holo-primary: #00d4ff;
+  --color-holo-glow: rgba(0, 212, 255, 0.3);
+  --holo-size: 200px;
+  --holo-z: 25;
+
   --color-user-bubble: #7b68ee;
   --color-user-bubble-text: #ffffff;
   --color-assistant-bubble: var(--color-surface);

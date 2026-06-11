@@ -329,7 +329,39 @@ pub async fn send_message(
     app.emit("chat-done", &full_response)
         .map_err(|e| e.to_string())?;
 
+    // Emit emotion tag based on response content
+    let emotion = detect_emotion(&full_response);
+    let _ = app.emit(
+        "holo:emotion",
+        &serde_json::json!({
+            "emotion": emotion,
+            "confidence": 0.8,
+        }),
+    );
+
     Ok(conv_id)
+}
+
+/// Simple keyword-based emotion detection from assistant response.
+fn detect_emotion(text: &str) -> &'static str {
+    let lower = text.to_lowercase();
+    if lower.contains("😊") || lower.contains("🙂") || lower.contains("😂")
+        || lower.contains("haha") || lower.contains("lol")
+        || lower.contains("glad") || lower.contains("happy")
+    {
+        "happy"
+    } else if lower.contains("😢") || lower.contains("😞") || lower.contains("sorry")
+        || lower.contains("unfortunately") || lower.contains("sadly")
+    {
+        "sad"
+    } else if lower.contains("🤔") || lower.contains("hmm")
+        || lower.contains("let me think") || lower.contains("consider")
+        || lower.contains("perhaps") || lower.contains("maybe")
+    {
+        "thinking"
+    } else {
+        "neutral"
+    }
 }
 
 /// Return all conversations (summaries).
