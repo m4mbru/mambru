@@ -277,29 +277,30 @@ export class HologramEngine {
   };
 
   /** Apply dance parameters as particle group transforms. */
-  private applyDance(dance: DanceParams, _elapsed: number): void {
+  private applyDance(dance: DanceParams, elapsed: number): void {
     if (!this.particles) return;
 
-    // Body sway
+    // Body sway (use elapsed for smooth oscillation)
     this.particles.rotation.z = dance.sway * 0.5;
-    this.particles.rotation.x = Math.sin(this.startTime * 0.003) * dance.sway * 0.2;
+    this.particles.rotation.x = Math.sin(elapsed * 2.5) * dance.sway * 0.15;
 
-    // Bounce (vertical)
-    this.particles.position.y += dance.bounce * 0.01;
+    // Bounce (set absolute, not relative — avoids position drift)
+    const baseY = Math.sin(elapsed * 0.5) * 0.02;
+    this.particles.position.y = baseY + dance.bounce * 0.08;
 
     // Spread (scale)
-    const spreadScale = 1 + (dance.spread - 1) * 0.3;
+    const spreadScale = 1 + (dance.spread - 1) * 0.4;
     this.particles.scale.set(spreadScale, spreadScale, spreadScale);
 
-    // Extra spin
-    if (dance.spin > 0.1) {
-      this.particles.rotation.y += 0.02 * dance.spin;
+    // Extra spin on top of ambient rotation
+    if (dance.spin > 0.05) {
+      this.particles.rotation.y += 0.015 * dance.spin;
     }
 
     // Pulse material size
     if (this.material) {
       const baseSize = 0.025 * this.audioParams.sizeMul;
-      this.material.size = baseSize * (1 + dance.bounce * 1.5);
+      this.material.size = baseSize * (1 + dance.bounce * 1.2);
     }
   }
 

@@ -32,6 +32,20 @@ export interface DanceControllerOptions {
   minDecibels?: number;
   maxDecibels?: number;
   smoothingTimeConstant?: number;
+  /** Energy history length for variance analysis (default: 43 = ~1s). */
+  energyHistoryLen?: number;
+  /** Standard-deviation threshold: above = rhythmic/music, below = speech (default: 0.012). */
+  varianceThreshold?: number;
+  /** Seconds of sustained rhythmic energy before declaring music (default: 2). */
+  minMusicDuration?: number;
+  /** Seconds of sustained low-variance before declaring speech (default: 1.5). */
+  minSpeechDuration?: number;
+  /** Number of FFT bins treated as bass (default: 10 ≈ 230Hz at 1024 FFT). */
+  bassBinCount?: number;
+  /** Smoothing rate for dance param attack (0–1, default: 0.12). */
+  attackSmooth?: number;
+  /** Decay multiplier per frame when music stops (default: 0.96). */
+  decayRate?: number;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -55,6 +69,9 @@ export class DanceController {
   private _isMusic = false;
   private time = 0;
 
+  // Resolved options with defaults
+  private opts: Required<DanceControllerOptions>;
+
   // Dance parameters (smoothed)
   private params: DanceParams = {
     intensity: 0,
@@ -65,7 +82,21 @@ export class DanceController {
     isMusic: false,
   };
 
-  constructor(private options: DanceControllerOptions = {}) {}
+  constructor(options: DanceControllerOptions = {}) {
+    this.opts = {
+      fftSize: options.fftSize ?? 1024,
+      minDecibels: options.minDecibels ?? -80,
+      maxDecibels: options.maxDecibels ?? -20,
+      smoothingTimeConstant: options.smoothingTimeConstant ?? 0.85,
+      energyHistoryLen: options.energyHistoryLen ?? 43,
+      varianceThreshold: options.varianceThreshold ?? 0.012,
+      minMusicDuration: options.minMusicDuration ?? 2,
+      minSpeechDuration: options.minSpeechDuration ?? 1.5,
+      bassBinCount: options.bassBinCount ?? 10,
+      attackSmooth: options.attackSmooth ?? 0.12,
+      decayRate: options.decayRate ?? 0.96,
+    };
+  }
 
   /** Start listening to the user's microphone for music detection. */
   async start(): Promise<void> {
@@ -77,10 +108,10 @@ export class DanceController {
       this.source = this.audioContext.createMediaStreamSource(this.stream);
 
       this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = this.options.fftSize ?? 1024;
-      this.analyser.minDecibels = this.options.minDecibels ?? -80;
-      this.analyser.maxDecibels = this.options.maxDecibels ?? -20;
-      this.analyser.smoothingTimeConstant = this.options.smoothingTimeConstant ?? 0.85;
+      this.analyser.fftSize = this.opts.fftSize;
+      this.analyser.minDecibels = this.opts.minDecibels;
+      this.analyser.maxDecibels = this.opts.maxDecibels;
+      this.analyser.smoothingTimeConstant = this.opts.smoothingTimeConstant;
 
       this.source.connect(this.analyser);
       this.fftBuffer = new Uint8Array(this.analyser.frequencyBinCount);
@@ -123,7 +154,7 @@ export class DanceController {
     const len = this.fftBuffer.length;
     let totalEnergy = 0;
     let bassEnergy = 0;
-    const bassCutoff = Math.min(len, 10); // first 10 bins = bass
+    const bassCutoff = Math.min(len, this.opts.bassBinCount);
 
     for (let i = 0; i < len; i++) {
       const normalized = this.fftBuffer[i] / 255;
@@ -137,7 +168,7 @@ export class DanceController {
 
     // Energy history for variance analysis
     this.energyHistory.push(totalEnergy);
-    if (this.energyHistory.length > ENERGY_HISTORY_LEN) {
+    if (this.energyHistory.length > this.opts.energyHistoryLen) {
       this.energyHistory.shift();
     }
 
@@ -153,30 +184,34 @@ export class DanceController {
     }
 
     // Only switch after sustained detection
-    if (this.musicDuration > MIN_MUSIC_DURATION) {
+    if (this.musicDuration > this.opts.minMusicDuration) {
       this._isMusic = true;
-    } else if (this.speechDuration > MIN_SPEECH_DURATION) {
+    } else if (this.speechDuration > this.opts.minSpeechDuration) {
       this._isMusic = false;
     }
 
     // Compute dance parameters
     if (this._isMusic) {
-      // Bass drives bounce
-      const bassPulse = bassEnergy * 2;
-      const beat = Math.sin(this.time * Math.PI * 4 * (0.8 + bassEnergy * 0.4));
+      const { attackSmooth } = this.opts;
 
-      this.params.intensity += (Math.min(1, totalEnergy * 3) - this.params.intensity) * 0.1;
-      this.params.bounce += (bassPulse * 0.3 * Math.max(0, beat) - this.params.bounce) * 0.15;
-      this.params.sway += (Math.sin(this.time * 0.5) * 0.15 * totalEnergy - this.params.sway) * 0.08;
-      this.params.spread += (1 + bassEnergy * 0.5 - this.params.spread) * 0.05;
-      this.params.spin += (0.5 + bassEnergy - this.params.spin) * 0.05;
+      // Bass drives bounce — detect individual beats
+      const bassPulse = bassEnergy * 2;
+      const beatPhase = (this.time * 120 * Math.PI) / 30; // assume ~120 BPM
+      const beat = Math.max(0, Math.sin(beatPhase));
+
+      this.params.intensity += (Math.min(1, totalEnergy * 2.5) - this.params.intensity) * attackSmooth;
+      this.params.bounce += (bassPulse * 0.4 * beat - this.params.bounce) * attackSmooth * 1.5;
+      this.params.sway += (Math.sin(this.time * 2.5) * 0.12 * (0.5 + bassEnergy) - this.params.sway) * attackSmooth * 0.8;
+      this.params.spread += (1 + bassEnergy * 0.6 - this.params.spread) * attackSmooth * 0.6;
+      this.params.spin += (0.3 + bassEnergy * 0.8 - this.params.spin) * attackSmooth * 0.7;
     } else {
       // Decay
-      this.params.intensity *= 0.97;
-      this.params.bounce *= 0.9;
-      this.params.sway *= 0.95;
-      this.params.spread += (1 - this.params.spread) * 0.05;
-      this.params.spin *= 0.98;
+      const { decayRate } = this.opts;
+      this.params.intensity *= decayRate;
+      this.params.bounce *= decayRate * 0.95;
+      this.params.sway *= decayRate;
+      this.params.spread += (1 - this.params.spread) * 0.03;
+      this.params.spin *= decayRate * 1.02;
     }
 
     this.params.isMusic = this._isMusic;
@@ -195,7 +230,7 @@ export class DanceController {
    * Music has higher variance (beats) than speech's more constant energy.
    */
   private detectMusic(currentEnergy: number): boolean {
-    if (this.energyHistory.length < ENERGY_HISTORY_LEN) return false;
+    if (this.energyHistory.length < this.opts.energyHistoryLen) return false;
 
     const mean = this.energyHistory.reduce((a, b) => a + b, 0) / this.energyHistory.length;
     const variance =
@@ -203,7 +238,6 @@ export class DanceController {
       this.energyHistory.length;
     const stdDev = Math.sqrt(variance);
 
-    // High std-dev + current energy above mean = rhythmic beat pattern
-    return stdDev > 0.015 && currentEnergy > mean;
+    return stdDev > this.opts.varianceThreshold && currentEnergy > mean;
   }
 }
