@@ -21,7 +21,7 @@
 
   // ── Tab state ───────────────────────────────────────────────────────────
 
-  type TabId = 'provider' | 'voice' | 'commands' | 'personality' | 'appearance';
+  type TabId = 'provider' | 'voice' | 'commands' | 'personality' | 'appearance' | 'avatar';
   let activeTab: TabId = 'provider';
 
   const tabs: Array<{ id: TabId; label: string; icon: string }> = [
@@ -30,6 +30,7 @@
     { id: 'commands', label: 'Commands', icon: 'terminal' },
     { id: 'personality', label: 'Personality', icon: 'smile' },
     { id: 'appearance', label: 'Appearance', icon: 'eye' },
+    { id: 'avatar', label: 'Avatar', icon: 'avatar' },
   ];
 
   // ── Local form state ───────────────────────────────────────────────────
@@ -459,7 +460,9 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
               >
                 {#if isListeningForKey}
                   Press a key...
-                {:else}
+            {:else if tab.icon === 'avatar'}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+            {:else}
                   <kbd>{pttKeyBinding}</kbd>
                 {/if}
               </button>
@@ -770,6 +773,74 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
                 <option value="es">Spanish</option>
               </select>
               <p class="hint">Controls UI language. Chat language adapts to your messages.</p>
+            </div>
+          </div>
+
+        <!-- Tab 6: Avatar -->
+        {:else if activeTab === 'avatar'}
+          <div class="tab-section">
+            <h3>Holographic Avatar</h3>
+            <p class="section-desc">Customise your 3D particle avatar that reacts to conversation and music.</p>
+
+            <div class="field">
+              <label class="toggle-row">
+                <span>Enable Avatar</span>
+                <label class="toggle" role="switch" aria-checked={localSettings.hologram.enabled} tabindex="0">
+                  <input type="checkbox" bind:checked={localSettings.hologram.enabled} on:change={handleSave} class="toggle-input" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </label>
+            </div>
+
+            <div class="field">
+              <label for="avatar-style">Style</label>
+              <select
+                id="avatar-style"
+                bind:value={localSettings.hologram.style}
+                on:change={handleSave}
+              >
+                <option value="woman1">Woman 1</option>
+                <option value="woman2">Woman 2</option>
+                <option value="man1">Man 1</option>
+                <option value="man2">Man 2</option>
+                <option value="sphere">Sphere</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="avatar-size">Size</label>
+              <div class="range-with-value">
+                <input
+                  id="avatar-size"
+                  type="range"
+                  min="100"
+                  max="400"
+                  step="10"
+                  bind:value={localSettings.hologram.size}
+                  on:change={handleSave}
+                  class="range-input"
+                />
+                <span class="range-value">{localSettings.hologram.size}px</span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="avatar-position">Position</label>
+              <select
+                id="avatar-position"
+                bind:value={localSettings.hologram.position}
+                on:change={handleSave}
+              >
+                <option value="floating">Floating (bottom-right)</option>
+                <option value="minimal">Minimal (corner)</option>
+                <option value="panel">Panel (sidebar)</option>
+              </select>
+            </div>
+
+            <div class="preview-note">
+              <p>Changes take effect immediately.</p>
             </div>
           </div>
         {/if}
@@ -1357,6 +1428,40 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     border-color: var(--color-primary);
     color: var(--color-primary);
     background: rgba(123, 104, 238, 0.05);
+  }
+
+  /* ── Avatar tab ─────────────────────────────── */
+
+  .range-with-value {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+  }
+
+  .range-with-value .range-input {
+    flex: 1;
+  }
+
+  .range-value {
+    min-width: 48px;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    text-align: right;
+  }
+
+  .preview-note {
+    margin-top: var(--space-lg);
+    padding: var(--space-md);
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    line-height: 1.5;
+  }
+
+  .preview-note p {
+    margin: 0;
   }
 
   /* ── Footer ───────────────────────────────────── */

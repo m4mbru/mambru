@@ -17,6 +17,7 @@
   import MessageBubble from './MessageBubble.svelte';
   import VoiceControls from './VoiceControls.svelte';
   import ConfirmationDialog from './ConfirmationDialog.svelte';
+  import HologramWidget from './HologramWidget.svelte';
 
   // ── State ───────────────────────────────────────────────────────────────
 
@@ -35,6 +36,32 @@
     ? $conversation.conversations.find((c) => c.id === $conversation.activeId)?.messages ?? []
     : [];
   $: streaming = $conversation.streaming;
+
+  // ── Image upload ─────────────────────────────────────────────────────────
+
+  let fileInput: HTMLInputElement;
+
+  function handleImageUpload() {
+    // Create a hidden file input and trigger it
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/webp';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        // Append as a user message with the image
+        conversation.appendMessage({
+          role: 'user',
+          content: `[Image: ${file.name}]\n${dataUrl}`,
+        });
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
 
   // ── Auto-scroll ─────────────────────────────────────────────────────────
 
@@ -322,6 +349,19 @@
         </button>
       {:else}
         <button
+          class="send-btn img-btn"
+          on:click={handleImageUpload}
+          disabled={streaming}
+          title="Attach image"
+          aria-label="Attach image"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+        </button>
+        <button
           class="send-btn"
           on:click={handleSend}
           disabled={!inputValue.trim()}
@@ -347,6 +387,9 @@
   on:resolve={handleDialogResolve}
   on:alwaysAllow={handleDialogAlwaysAllow}
 />
+
+<!-- Holographic avatar overlay -->
+<HologramWidget />
 
 <style>
   .chat-container {
@@ -588,5 +631,16 @@
 
   .send-btn.stop-btn:hover {
     background: #e05555;
+  }
+
+  .send-btn.img-btn {
+    background: transparent;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+  }
+
+  .send-btn.img-btn:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
   }
 </style>
