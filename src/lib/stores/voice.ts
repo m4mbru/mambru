@@ -21,6 +21,8 @@ export interface VoiceState {
   error: string;
   /** Whether continuous capture mode is active. */
   continuousMode: boolean;
+  /** Current microphone audio level (0–1), used for reactivity. */
+  audioLevel: number;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────
@@ -35,6 +37,7 @@ const initialState: VoiceState = {
   lastTranscription: '',
   error: '',
   continuousMode: true,
+  audioLevel: 0,
 };
 
 /**
