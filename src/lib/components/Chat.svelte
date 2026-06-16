@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, afterUpdate } from 'svelte';
   import { conversation } from '../stores/conversation';
-  import { settings } from '../stores/settings';
   import {
     sendMessage,
     listenForTokens,
@@ -39,7 +38,7 @@
 
   // ── Image upload ─────────────────────────────────────────────────────────
 
-  let fileInput: HTMLInputElement;
+  
 
   function handleImageUpload() {
     // Create a hidden file input and trigger it
@@ -146,7 +145,7 @@
       // Send the message via IPC
       const activeId = $conversation.activeId;
       await flog(`before sendMessage invoke, activeId=${activeId}`);
-      const result = await sendMessage(text, activeId);
+      const result = await sendMessage(text, activeId ?? undefined);
       await flog(`after sendMessage invoke, result=${result}`);
 
       // If the backend returned a different conversation ID than we sent,
@@ -296,13 +295,11 @@
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </div>
-        <h2
+        <button
           class="empty-title"
-          role="button"
-          tabindex="-1"
+          type="button"
           on:click={() => inputElement?.focus()}
-          on:keydown={(e) => e.key === 'Enter' && inputElement?.focus()}
-        >Ask me anything, che</h2>
+        >Ask me anything, che</button>
         <p class="empty-subtitle">
           Send a message or press <kbd>Ctrl+N</kbd> to start a new conversation.
         </p>
@@ -367,7 +364,6 @@
         rows="1"
         disabled={streaming}
         class:input-disabled={streaming}
-        autofocus
         aria-label="Message input"
       ></textarea>
 

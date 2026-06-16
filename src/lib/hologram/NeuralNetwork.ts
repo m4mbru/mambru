@@ -87,7 +87,7 @@ export class NeuralNetwork {
   private headGroup: Group | null = null;
   private headMat: MeshStandardMaterial | null = null;
   private wireMat: MeshBasicMaterial | null = null;
-  private faceWire: Mesh | null = null;
+  
   private headBaseY = 0;
   private headPhase = 0;
   private emitterMat: MeshBasicMaterial | null = null;
@@ -430,7 +430,6 @@ export class NeuralNetwork {
     // ─── Bottom tier ───────────────────────────────────────────
     const lightGray = '#E8E8E8';
     const midGray = '#C0C0C0';
-    const darkGray = '#909090';
     const shadowGray = '#606060';
 
     // Gradient texture for cylinder walls — top lighter, bottom darker (ambient occlusion)
@@ -1047,7 +1046,6 @@ export class NeuralNetwork {
     this.connPairs = [];
     this.beamState = [];
     this.faceMesh = null;
-    this.faceWire = null;
     this.emitterMat = null;
     this.orbitalRing = null;
     this.platformGroup = null;

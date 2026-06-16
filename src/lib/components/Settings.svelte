@@ -2,14 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { slide } from 'svelte/transition';
   import { settings as settingsStore } from '../stores/settings';
-  import type {
-    Settings,
-    ProviderSettings,
-    VoiceConfig,
-    AppearanceConfig,
-    PersonalityConfig,
-    SearchConfig,
-  } from '../stores/settings';
+  import type { Settings } from '../stores/settings';
   import { voice } from '../stores/voice';
   import { getCommands, saveCommand, deleteCommand, buildCommand } from '../api/tools';
   import type { Command, CommandAction } from '../api/tools';
@@ -121,6 +114,11 @@
     } catch (_) {
       commands = [];
     }
+  }
+
+  function setCmdArgs(e: Event) {
+    const val = (e.target as HTMLInputElement).value;
+    (newCommandAction as any).args = val ? val.split(',').map((a: string) => a.trim()) : [];
   }
 
   // ── Save ────────────────────────────────────────────────────────────────
@@ -274,7 +272,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
 <div class="settings-outer" class:slideover={!panelMode} class:open class:panel-mode={panelMode}>
   {#if !panelMode}
     {#if open}
-      <div class="settings-backdrop" on:click={onClose}></div>
+      <div class="settings-backdrop" role="button" tabindex="0" on:click={onClose} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') && onClose()}></div>
     {/if}
   {/if}
 
@@ -297,7 +295,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     {/if}
 
     <!-- Tab navigation -->
-    <nav class="tab-nav" role="tablist" aria-label="Settings tabs">
+    <div class="tab-nav" role="tablist" aria-label="Settings tabs">
       {#each tabs as tab}
         <button
           class="tab-btn"
@@ -325,7 +323,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
           <span class="tab-label">{tab.label}</span>
         </button>
       {/each}
-    </nav>
+    </div>
 
     <!-- Tab content -->
     <div class="tab-panel" id="tab-panel" role="tabpanel">
@@ -456,20 +454,21 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
             <p class="section-desc">Configure speech input and output.</p>
 
             <div class="field">
-              <label class="toggle-row">
+              <div class="toggle-row">
                 <span>Text-to-Speech</span>
-                <label class="toggle" role="switch" aria-checked={localSettings.voice.tts_enabled} tabindex="0">
-                  <input type="checkbox" bind:checked={localSettings.voice.tts_enabled} on:change={handleSave} class="toggle-input" />
+                <label class="toggle">
+                  <input role="switch" aria-checked={localSettings.voice.tts_enabled} type="checkbox" bind:checked={localSettings.voice.tts_enabled} on:change={handleSave} class="toggle-input" />
                   <span class="toggle-track">
                     <span class="toggle-thumb"></span>
                   </span>
                 </label>
-              </label>
+              </div>
             </div>
 
             <div class="field">
-              <label>Push-to-Talk Key</label>
+              <div class="field-label">Push-to-Talk Key</div>
               <button
+                id="ptt-btn"
                 class="key-binding-btn"
                 on:click={startKeyListening}
                 disabled={isListeningForKey}
@@ -599,11 +598,8 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
                     <input
                       id="cmd-args"
                       type="text"
-                      placeholder="e.g. {app}, --new-window"
-                      on:change={(e) => {
-                        const val = (e.target).value;
-                        newCommandAction.args = val ? val.split(',').map(a => a.trim()) : [];
-                      }}
+                      placeholder="e.g. app, --new-window"
+                      on:change={setCmdArgs}
                     />
                   </div>
                 {:else if newCommandAction.type === 'script'}
@@ -666,8 +662,8 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
                       <span class="risk-badge-sm risk-{cmd.risk.toLowerCase()}">{cmd.risk}</span>
                     </div>
                     <div class="cmd-actions">
-                      <label class="toggle" role="switch" aria-checked={cmd.enabled}>
-                        <input type="checkbox" checked={cmd.enabled} on:change={() => {}} class="toggle-input" />
+                      <label class="toggle">
+                        <input role="switch" aria-checked={cmd.enabled} type="checkbox" checked={cmd.enabled} on:change={() => {}} class="toggle-input" />
                         <span class="toggle-track">
                           <span class="toggle-thumb"></span>
                         </span>
@@ -750,11 +746,11 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
               </div>
             {/if}
 
-            <div class="field">
-              <label>Effective System Prompt</label>
-              <div class="prompt-preview">
-                <pre>{effectivePrompt}</pre>
-              </div>
+              <div class="field">
+                <div class="field-label">Effective System Prompt</div>
+                <div class="prompt-preview">
+                  <pre>{effectivePrompt}</pre>
+                </div>
               {#if localSettings.personality.preset !== 'default'}
                 <button class="btn btn-sm" on:click={() => {
                   localSettings.personality.preset = 'default';
@@ -775,7 +771,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
             <p class="section-desc">Customise the look and feel of Mambru.</p>
 
             <div class="field">
-              <label>Theme</label>
+              <div class="field-label">Theme</div>
               <div class="theme-options">
                 <button
                   class="theme-option"
@@ -830,19 +826,19 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
             <p class="section-desc">Customise your 3D particle avatar that reacts to conversation and music.</p>
 
             <div class="field">
-              <label class="toggle-row">
+              <div class="toggle-row">
                 <span>Enable Avatar</span>
-                <label class="toggle" role="switch" aria-checked={localSettings.hologram.enabled} tabindex="0">
-                  <input type="checkbox" bind:checked={localSettings.hologram.enabled} on:change={handleSave} class="toggle-input" />
+                <label class="toggle">
+                  <input role="switch" aria-checked={localSettings.hologram.enabled} type="checkbox" bind:checked={localSettings.hologram.enabled} on:change={handleSave} class="toggle-input" />
                   <span class="toggle-track">
                     <span class="toggle-thumb"></span>
                   </span>
                 </label>
-              </label>
+              </div>
             </div>
 
             <div class="field">
-              <label>Style</label>
+              <div class="field-label">Style</div>
               <div class="avatar-grid">
                 {#each avatarStyles as style}
                   <button

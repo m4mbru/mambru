@@ -10,7 +10,7 @@
   let frameId = 0;
   let phase = 0;
 
-  function draw(timestamp: number) {
+  function draw(_timestamp: number) {
     if (!canvas || !ctx) return;
     const w = canvas.width;
     const h = canvas.height;

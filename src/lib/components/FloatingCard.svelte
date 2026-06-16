@@ -29,7 +29,6 @@
   let expOrigX = 0;
   let expOrigY = 0;
 
-  $: isExpanded = $hudState.mode === 'expanded' && $hudState.activePanel === id;
   $: isActive = ($hudState.mode === 'expanded' || $hudState.mode === 'expanding') && $hudState.activePanel === id;
 
   // Collapsed: orbital position + drag offset. Expanded: centered + exp drag offset
@@ -77,11 +76,11 @@
     isExpDrag = false;
   }
 
-  function handleClick(e: MouseEvent) {
+  function handleClick(e?: MouseEvent) {
     if (isDragging || isExpDrag) return;
     if (!id) return;
-    // Don't toggle when clicking interactive elements inside an expanded panel
-    if (isActive && (e.target as HTMLElement).closest('button, input, select, textarea, a, [role="tab"], [role="switch"], label')) return;
+    // If event provided (mouse click), don't toggle when clicking interactive elements inside an expanded panel
+    if (e && isActive && (e.target as HTMLElement).closest('button, input, select, textarea, a, [role="tab"], [role="switch"], label')) return;
     expandPanel(id);
   }
 
@@ -101,7 +100,7 @@
   on:mousedown={handleMouseDown}
   on:click={handleClick}
   role={isActive ? 'dialog' : 'button'}
-  tabindex="0"
+  tabindex="-1"
   on:keydown={(e) => e.key === 'Enter' && !isActive && handleClick()}
 >
   <div class="card-glow"></div>
@@ -110,7 +109,7 @@
 
   {#if isActive}
     <div class="expanded-inner">
-      <div class="card-header drag-handle" on:mousedown={handleHeaderMouseDown}>
+      <div class="card-header drag-handle" on:mousedown={handleHeaderMouseDown} role="button" tabindex="0" on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && e.preventDefault()}>
         <div class="card-led" style="background: {accentColor}"></div>
         <span class="card-title">{title}</span>
         <button class="close-btn" on:click={handleClose} aria-label="Close">

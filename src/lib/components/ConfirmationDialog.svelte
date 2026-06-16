@@ -96,15 +96,18 @@
   <div
     class="dialog-overlay"
     on:click|self={deny}
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="dialog-title"
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => e.key === 'Escape' && deny()}
     in:fly={{ y: 20, duration: 150 }}
     out:fly={{ y: 20, duration: 100 }}
   >
     <!-- Dialog -->
     <div
       class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
       class:dangerous={pending.risk === 'Dangerous'}
       in:scale={{ start: 0.95, duration: 150 }}
       out:scale={{ start: 0.95, duration: 100 }}
