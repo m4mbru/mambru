@@ -2,62 +2,39 @@
 
 ## Purpose
 
-Futuristic particle-based hologram avatar that reacts to voice and serves as Mambru's visual identity in the chat interface.
+Particle-based female digital human head that serves as Mambru's visual identity at the center of the fullscreen holographic HUD.
 
 ## Requirements
 
-### R1: Particle System
+### R1: WebGL Female Head
 
-The system MUST render a dynamic particle cloud that forms a human face silhouette.
+The particle system now renders a female digital human head instead of generic face shapes.
 
-#### Scenario: Default state
+#### Scenario: Female head is default
 
-- GIVEN Mambru is idle
-- WHEN the app starts
-- THEN ~2000 particles form a stable face silhouette
-- AND particles exhibit subtle floating motion (Perlin noise)
+- GIVEN the HUD is active
+- WHEN the WebGL scene initialises
+- THEN the central particle system SHALL form a recognisable female face silhouette
+- AND the face SHALL be constructed from glowing cyan/white data points
+- AND SHALL match the reference image style (digitalised, luminous, data-point construction)
 
-#### Scenario: Particle count
+#### Scenario: Styles removed
 
-- GIVEN the system is running
-- WHEN the user changes settings
-- THEN the particle count SHOULD be configurable (1000–5000)
-
-### R2: Voice Reactivity
-
-The particle system MUST react to voice input and output.
-
-#### Scenario: User speaking
-
-- GIVEN the user is recording via PTT
-- WHEN audio levels change
-- THEN particles SHOULD disperse outward proportionally to volume
-- AND return to silhouette when silence resumes
-
-#### Scenario: Mambru speaking (TTS)
-
-- GIVEN Mambru is generating TTS audio
-- WHEN audio plays
-- THEN particles SHOULD pulse/ripple in sync with speech
-- AND the "mouth" area SHOULD emit more particles during speech
+- GIVEN the HUD is active
+- WHEN style selection was available in the old spec
+- THEN the system SHALL only offer one style (female head)
+- AND the style selector SHALL be removed from Settings
 
 ### R3: Silhouette Rendering
 
-The system MUST render a recognizable human face silhouette.
+The system MUST render a recognizable human face silhouette as part of the central HUD.
 
 #### Scenario: Profile view
 
 - GIVEN default settings
-- WHEN the avatar loads
-- THEN a side-profile silhouette SHOULD be visible from the particle cloud
-- AND the silhouette SHOULD be gender-neutral and abstract
-
-#### Scenario: Alternative silhouettes
-
-- GIVEN the user opens settings
-- WHEN they select a different avatar style
-- THEN the system SHOULD support multiple silhouette presets
-- AND the user MAY load a custom silhouette image
+- WHEN the HUD loads
+- THEN a female face silhouette SHALL be visible from the particle cloud
+- AND the silhouette SHALL match the female head reference style
 
 ### R4: Performance
 
@@ -67,22 +44,22 @@ The system MUST maintain 60 FPS on modern hardware.
 
 - GIVEN the avatar is active
 - WHEN rendering
-- THEN the particle system MUST use Canvas 2D (not WebGL for broad compatibility)
+- THEN the particle system MUST use WebGL via Three.js
 - AND the render loop SHOULD use requestAnimationFrame
-- AND particle count SHOULD auto-adjust if FPS drops below 30
+- AND particle auto-quality adjustment is handled by the holographic-hud spec
 
 #### Scenario: Disabling
 
 - GIVEN the user prefers performance
 - WHEN they toggle the avatar off
-- THEN the canvas MUST be hidden
-- AND zero CPU/GPU resources consumed
+- THEN the WebGL scene MUST continue rendering (HUD remains active)
+- BUT the avatar opacity SHALL reduce to minimum
 
 ## Technical Approach
 
-- Canvas 2D overlay in the chat area (right side, semi-transparent)
-- Particle positions calculated from sampled silhouette image pixels
-- Perlin noise library for organic movement
-- Audio analyser node from microphone/playback stream for reactivity
-- Settings: enable/disable, particle count, silhouette preset
-- The canvas replaces/hovers behind the right side of the chat area when visible
+- WebGL via Three.js, rendered as part of the fullscreen HUD scene
+- Particle positions calculated from sampled female head reference geometry
+- Perlin noise library for organic floating movement
+- Audio reactivity, emotion expressions, and dance features removed in this change
+- Settings: avatar enable/disable, size relative to viewport (managed by user-settings)
+- The avatar is the fixed centerpiece of the HUD, not a floating overlay

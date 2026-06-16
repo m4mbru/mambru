@@ -8,21 +8,28 @@ User settings provide a graphical panel for configuring all aspects of Mambru â€
 
 ### Requirement: Settings Panel
 
-The system MUST provide a Svelte-based settings panel accessible from the chat UI.
+The system MUST provide a settings panel that renders inside a holographic panel expanding from the orbital HUD.
 
-#### Scenario: Open settings from chat
+#### Scenario: Open settings from HUD
 
-- GIVEN the user is viewing the chat interface
-- WHEN they click the settings icon or press a keyboard shortcut
-- THEN the settings panel opens as an overlay or side panel
-- AND the chat remains accessible behind it
+- GIVEN the user is viewing the orbital HUD
+- WHEN they click the Settings panel
+- THEN the Settings panel SHALL expand to center with fluid animation
+- AND all settings sections (Provider, Voice, Commands, Personality, Appearance, Avatar) SHALL be available
 
-#### Scenario: Settings persist on close
+#### Scenario: Settings close
 
-- GIVEN the user modifies settings
-- WHEN they close the settings panel
-- THEN all changes are persisted to disk
-- AND the new settings take effect immediately
+- GIVEN the Settings panel is expanded
+- WHEN the user clicks close or presses Escape
+- THEN the panel SHALL collapse back to orbital position
+- AND all changed settings SHALL persist to disk
+
+#### Scenario: Avatar size adjustment
+
+- GIVEN the Avatar section is visible in Settings
+- WHEN the user adjusts the hologram size
+- THEN the hologram SHALL scale relative to the window height (default: 40% of viewport height)
+- AND the minimum SHALL be 20% and maximum 70% of viewport height
 
 ### Requirement: Provider Configuration
 

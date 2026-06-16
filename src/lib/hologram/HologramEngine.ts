@@ -4,15 +4,11 @@
  * Lazy-loaded via dynamic `import('three')`. Manages:
  * - Scene, camera, renderer lifecycle
  * - Particle system (Points) with morphable styles
- * - Emotion expression presets
- * - Dance/music-driven animation
- * - Audio reactivity (voice level → brightness/size)
  *
  * Usage:
  * ```ts
  * const engine = new HologramEngine(canvas);
  * await engine.init();
- * engine.setEmotion('happy');
  * engine.setStyle('woman1');
  * // ... on destroy:
  * engine.destroy();
@@ -33,37 +29,22 @@ import {
   snapToStyle,
   type ParticleStyle,
 } from './particles';
-import {
-  applyEmotion,
-  blendEmotion,
-  type Emotion,
-} from './emotions';
-import { DanceController, type DanceParams } from './dance';
-import {
-  computeAudioParams,
-  defaultAudioParams,
-  type AudioReactivityParams,
-} from './audioReactivity';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
 export interface HologramEngineOptions {
   /** Canvas pixel density (default: devicePixelRatio). */
   pixelRatio?: number;
-  /** Enable dance/music detection (default: true). */
-  enableDance?: boolean;
-  /** Enable audio reactivity (default: true). */
-  enableAudioReactivity?: boolean;
   /** Morph transition speed (0–1, default: 0.03). */
   morphSpeed?: number;
+  /** Optional per-frame callback (delta, elapsed). */
+  onUpdate?: (delta: number, elapsed: number) => void;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────
 
 const DEFAULT_OPTIONS: HologramEngineOptions = {
   pixelRatio: undefined,
-  enableDance: true,
-  enableAudioReactivity: true,
   morphSpeed: 0.03,
 };
 
@@ -84,21 +65,21 @@ export class HologramEngine {
   // State
   private particleData = createParticleData();
   private currentStyle: ParticleStyle = 'woman1';
-  private currentEmotion: Emotion = 'neutral';
-  private previousEmotion: Emotion = 'neutral';
-  private emotionTransition = 1; // 1 = fully transitioned
   private animFrameId: number | null = null;
   private startTime = 0;
   private running = false;
 
-  // Sub-controllers
-  private dance: DanceController;
-  private audioParams: AudioReactivityParams = defaultAudioParams();
+  // FPS monitor
+  private frameTimes: number[] = [];
+  private smoothedFps = 60;
+  private lowFpsSince = 0;
+  private highFpsSince = 0;
+  private originalParticleSize = 0.025;
+  particleScale = 1.0;
 
   constructor(canvas: HTMLCanvasElement, options?: HologramEngineOptions) {
     this.canvas = canvas;
     this.options = { ...DEFAULT_OPTIONS, ...options };
-    this.dance = new DanceController();
   }
 
   /** Initialize Three.js scene and start the render loop. */
@@ -116,7 +97,7 @@ export class HologramEngine {
     // Camera
     const aspect = this.canvas.width / this.canvas.height || 1;
     this.camera = new T.PerspectiveCamera(45, aspect, 0.1, 10);
-    this.camera.position.set(0, 0, 2.2);
+    this.camera.position.set(0, 0.1, 2.4);
 
     // Renderer
     this.renderer = new T.WebGLRenderer({
@@ -130,11 +111,12 @@ export class HologramEngine {
     this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight, false);
 
     // Particle material
+    this.originalParticleSize = 0.02;
     this.material = new T.PointsMaterial({
-      size: 0.025,
+      size: this.originalParticleSize,
       vertexColors: true,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.15,
       blending: T.AdditiveBlending,
       depthWrite: false,
       sizeAttenuation: true,
@@ -143,11 +125,6 @@ export class HologramEngine {
     // Particle system
     this.particles = new T.Points(this.particleData.geometry, this.material);
     this.scene.add(this.particles);
-
-    // Start dance controller
-    if (this.options.enableDance) {
-      this.dance.start();
-    }
 
     // Start loop
     this.running = true;
@@ -167,7 +144,6 @@ export class HologramEngine {
     }
 
     window.removeEventListener('resize', this.onResize);
-    this.dance.stop();
 
     if (this.renderer) {
       this.renderer.dispose();
@@ -201,20 +177,40 @@ export class HologramEngine {
     }
   }
 
-  // ─── Emotion ─────────────────────────────────────────────────────
+  // ─── FPS Monitor ────────────────────────────────────────────────
 
-  /** Set the current emotion. Smoothly transitions from previous. */
-  setEmotion(emotion: Emotion): void {
-    if (emotion !== this.currentEmotion) {
-      this.previousEmotion = this.currentEmotion;
-      this.currentEmotion = emotion;
-      this.emotionTransition = 0;
+  private updateFps(now: number): void {
+    this.frameTimes.push(now);
+    while (this.frameTimes.length > 0 && this.frameTimes[0] < now - 1000) {
+      this.frameTimes.shift();
+    }
+    this.smoothedFps = this.frameTimes.length;
+
+    if (this.smoothedFps < 30) {
+      if (this.lowFpsSince === 0) {
+        this.lowFpsSince = now;
+      } else if (now - this.lowFpsSince > 2000) {
+        this.particleScale = 0.75;
+        if (this.material) this.material.size = this.originalParticleSize * this.particleScale;
+      }
+    } else {
+      this.lowFpsSince = 0;
+    }
+
+    if (this.smoothedFps > 55) {
+      if (this.highFpsSince === 0) {
+        this.highFpsSince = now;
+      } else if (now - this.highFpsSince > 5000 && this.particleScale < 1.0) {
+        this.particleScale = 1.0;
+        if (this.material) this.material.size = this.originalParticleSize * this.particleScale;
+      }
+    } else {
+      this.highFpsSince = 0;
     }
   }
 
-  /** Get the current emotion. */
-  getEmotion(): Emotion {
-    return this.currentEmotion;
+  getFps(): number {
+    return this.smoothedFps;
   }
 
   // ─── Render Loop ─────────────────────────────────────────────────
@@ -224,84 +220,29 @@ export class HologramEngine {
 
     this.animFrameId = requestAnimationFrame(this.loop);
 
-    const delta = 0.016; // ~60fps per frame
+    this.updateFps(now);
+
+    const delta = 0.016;
     const elapsed = (now - this.startTime) / 1000;
+
+    this.options.onUpdate?.(delta, elapsed);
 
     const T = this.Three;
     if (!T || !this.particles || !this.renderer || !this.scene || !this.camera) return;
 
-    // 1. Style morph
     const targetPos = this.particleData.morphTargets[this.currentStyle];
     morphToStyle(this.particleData.geometry, targetPos, this.options.morphSpeed ?? 0.03);
 
-    // 2. Emotion expression
-    if (this.emotionTransition < 1) {
-      this.emotionTransition = Math.min(1, this.emotionTransition + 0.03);
-      blendEmotion(
-        this.particleData.geometry,
-        this.previousEmotion,
-        this.currentEmotion,
-        this.emotionTransition,
-        elapsed,
-      );
-    } else {
-      applyEmotion(this.particleData.geometry, this.currentEmotion, elapsed);
-    }
-
-    // 3. Audio reactivity
-    if (this.options.enableAudioReactivity) {
-      this.audioParams = computeAudioParams(this.audioParams);
-      if (this.material) {
-        this.material.size = 0.025 * this.audioParams.sizeMul;
-      }
-    }
-
-    // 4. Dance
-    if (this.options.enableDance) {
-      const dance = this.dance.update(delta);
-
-      // Apply dance transforms
-      if (dance.intensity > 0.05) {
-        this.applyDance(dance, elapsed);
-      }
-    }
-
-    // 5. Slow ambient rotation
     if (this.particles) {
-      this.particles.rotation.y += delta * 0.15;
-      // Gentle floating
+      this.particles.rotation.y += delta * 0.08;
       this.particles.position.y = Math.sin(elapsed * 0.5) * 0.02;
     }
 
     this.renderer.render(this.scene, this.camera);
   };
 
-  /** Apply dance parameters as particle group transforms. */
-  private applyDance(dance: DanceParams, elapsed: number): void {
-    if (!this.particles) return;
-
-    // Body sway (use elapsed for smooth oscillation)
-    this.particles.rotation.z = dance.sway * 0.5;
-    this.particles.rotation.x = Math.sin(elapsed * 2.5) * dance.sway * 0.15;
-
-    // Bounce (set absolute, not relative — avoids position drift)
-    const baseY = Math.sin(elapsed * 0.5) * 0.02;
-    this.particles.position.y = baseY + dance.bounce * 0.08;
-
-    // Spread (scale)
-    const spreadScale = 1 + (dance.spread - 1) * 0.4;
-    this.particles.scale.set(spreadScale, spreadScale, spreadScale);
-
-    // Extra spin on top of ambient rotation
-    if (dance.spin > 0.05) {
-      this.particles.rotation.y += 0.015 * dance.spin;
-    }
-
-    // Pulse material size
-    if (this.material) {
-      const baseSize = 0.025 * this.audioParams.sizeMul;
-      this.material.size = baseSize * (1 + dance.bounce * 1.2);
-    }
+  getScene(): Scene | null {
+    return this.scene;
   }
 
   // ─── Resize ──────────────────────────────────────────────────────

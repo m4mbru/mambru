@@ -12,12 +12,12 @@
   import { invoke } from '@tauri-apps/api/core';
 
   const flog = (msg: string) => invoke('log_debug', { msg }).catch(() => {});
+  export let panelMode: boolean = false;
   import { listenForCmdAutoResult, listenForCmdConfirm, listenForCmdPreview } from '../api/tools';
   import type { PendingExecutionEvent } from '../api/tools';
   import MessageBubble from './MessageBubble.svelte';
   import VoiceControls from './VoiceControls.svelte';
   import ConfirmationDialog from './ConfirmationDialog.svelte';
-  import HologramWidget from './HologramWidget.svelte';
 
   // ── State ───────────────────────────────────────────────────────────────
 
@@ -245,9 +245,29 @@
   function handleDialogAlwaysAllow(_event: CustomEvent<{ id: string; commandName: string }>) {
     pendingExecution = null;
   }
+
+  function handleConvChange(e: Event) {
+    const id = (e.target as HTMLSelectElement).value;
+    if (id) conversation.switchConversation(id);
+  }
 </script>
 
 <div class="chat-container">
+  {#if panelMode}
+    <div class="conv-selector">
+      <select
+        class="conv-select"
+        value={$conversation.activeId ?? ''}
+        on:change={handleConvChange}
+      >
+        {#each $conversation.conversations as conv}
+          <option value={conv.id} selected={conv.id === $conversation.activeId}>
+            {conv.title}
+          </option>
+        {/each}
+      </select>
+    </div>
+  {/if}
   <!-- Loading state -->
   {#if loading}
     <div class="state-container">
@@ -388,9 +408,6 @@
   on:alwaysAllow={handleDialogAlwaysAllow}
 />
 
-<!-- Holographic avatar overlay -->
-<HologramWidget />
-
 <style>
   .chat-container {
     display: flex;
@@ -398,6 +415,35 @@
     height: 100%;
     background: var(--color-bg);
     position: relative;
+  }
+
+  .conv-selector {
+    padding: var(--space-sm) var(--space-lg);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
+  }
+
+  .conv-select {
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(0, 188, 212, 0.3);
+    border-radius: var(--radius-md);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-sm);
+    outline: none;
+    cursor: pointer;
+    transition: border-color var(--transition-fast);
+  }
+
+  .conv-select:focus {
+    border-color: rgba(0, 188, 212, 0.7);
+  }
+
+  .conv-select option {
+    background: #1a1d31;
+    color: var(--color-text);
   }
 
   /* ── State Containers ───────────────────────── */

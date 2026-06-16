@@ -88,3 +88,29 @@ The system MUST maintain an in-memory list of conversations, auto-scroll to the 
 - WHEN the user selects a different conversation
 - THEN the chat view loads that conversation's message history
 - AND the streaming state resets for the previous conversation
+
+### Requirement: Chat in Orbital Panel
+
+The chat interface MUST now render inside a holographic panel that expands from orbit.
+
+#### Scenario: Chat opens as expanded panel
+
+- GIVEN the user is viewing the orbital HUD
+- WHEN they click the Chat panel
+- THEN the Chat panel SHALL expand to center with fluid animation
+- AND the full chat interface SHALL be available (input field, message history, streaming)
+- AND all existing chat behaviour SHALL work unchanged
+
+#### Scenario: Chat closes
+
+- GIVEN the user is interacting with an expanded Chat panel
+- WHEN they click the close button or press Escape
+- THEN the panel SHALL collapse back to orbital position
+- AND the conversation state SHALL be preserved
+
+#### Scenario: Switch conversations in panel
+
+- GIVEN the Chat panel is expanded
+- WHEN the user clicks a conversation selector
+- THEN a dropdown SHALL show available conversations
+- AND selecting one SHALL load that conversation

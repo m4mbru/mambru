@@ -18,6 +18,7 @@
 
   export let open = false;
   export let onClose: () => void = () => {};
+  export let panelMode: boolean = false;
 
   // ── Tab state ───────────────────────────────────────────────────────────
 
@@ -251,36 +252,30 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
 
 <svelte:window on:keydown={handleKeyCapture} />
 
-<!-- Settings slideover panel -->
-<aside
-  class="settings-panel"
-  class:open
-  role="dialog"
-  aria-modal="true"
-  aria-label="Settings"
->
-  <!-- Overlay backdrop -->
-  {#if open}
-    <div class="settings-backdrop" on:click={onClose}></div>
+<div class="settings-outer" class:slideover={!panelMode} class:open>
+  {#if !panelMode}
+    {#if open}
+      <div class="settings-backdrop" on:click={onClose}></div>
+    {/if}
   {/if}
 
-  <!-- Panel -->
   <div
     class="settings-content"
     class:open
     in:slide={{ duration: 200, axis: 'x' }}
     out:slide={{ duration: 150, axis: 'x' }}
   >
-    <!-- Header -->
-    <div class="settings-header">
-      <h2>Settings</h2>
-      <button class="close-btn" on:click={onClose} aria-label="Close settings">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
-    </div>
+    {#if !panelMode}
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button class="close-btn" on:click={onClose} aria-label="Close settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    {/if}
 
     <!-- Tab navigation -->
     <nav class="tab-nav" role="tablist" aria-label="Settings tabs">
@@ -801,28 +796,24 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
                 bind:value={localSettings.hologram.style}
                 on:change={handleSave}
               >
-                <option value="woman1">Woman 1</option>
-                <option value="woman2">Woman 2</option>
-                <option value="man1">Man 1</option>
-                <option value="man2">Man 2</option>
-                <option value="sphere">Sphere</option>
+                <option value="woman1">Female Head</option>
               </select>
             </div>
 
             <div class="field">
-              <label for="avatar-size">Size</label>
+              <label for="avatar-size">Size (% of viewport height)</label>
               <div class="range-with-value">
                 <input
                   id="avatar-size"
                   type="range"
-                  min="100"
-                  max="400"
-                  step="10"
+                  min="20"
+                  max="70"
+                  step="5"
                   bind:value={localSettings.hologram.size}
                   on:change={handleSave}
                   class="range-input"
                 />
-                <span class="range-value">{localSettings.hologram.size}px</span>
+                <span class="range-value">{localSettings.hologram.size}% vh</span>
               </div>
             </div>
 
@@ -852,12 +843,12 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
       <span class="footer-hint">Settings are saved automatically</span>
     </div>
   </div>
-</aside>
+</div>
 
 <style>
   /* ── Panel layout ───────────────────────────── */
 
-  .settings-panel {
+  .settings-outer.slideover {
     position: fixed;
     top: 0;
     right: 0;
@@ -868,8 +859,15 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     pointer-events: none;
   }
 
-  .settings-panel.open {
+  .settings-outer.slideover.open {
     pointer-events: auto;
+  }
+
+  .settings-outer:not(.slideover) {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
   }
 
   .settings-backdrop {
