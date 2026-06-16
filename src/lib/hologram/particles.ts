@@ -9,7 +9,7 @@
  * procedurally from parametric equations (no external mesh required).
  */
 
-import { BufferGeometry, BufferAttribute } from 'three';
+import { BufferGeometry, BufferAttribute, DynamicDrawUsage } from 'three';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -33,41 +33,15 @@ const PARTICLE_COUNT = 6000;
 
 // ─── Generators ──────────────────────────────────────────────────────
 
-/** Generate random points within a female silhouette (hourglass shape). */
+/** Minimal placeholder — tiny subtle ring, no distracting shape. */
 function generateWomanSilhouette(count: number): Float32Array {
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
-    const t = Math.random(); // 0–1 vertical
-    const y = (t - 0.5) * 2; // -1..1
-    const absY = Math.abs(y);
-
-    // Hourglass profile: narrow waist, wider hips/shoulders
-    let radius = 0.35;
-    if (absY < 0.2) {
-      // Head
-      radius = 0.15 * (1 - absY / 0.2);
-    } else if (absY < 0.5) {
-      // Torso — narrow at waist (y ≈ 0.3)
-      const waistT = (absY - 0.2) / 0.3;
-      radius = 0.15 + 0.25 * (1 - waistT) + 0.05 * Math.sin(waistT * Math.PI);
-    } else if (absY < 0.75) {
-      // Hips
-      const hipT = (absY - 0.5) / 0.25;
-      radius = 0.15 + 0.25 * (1 - Math.abs(hipT - 0.5) * 0.6);
-    } else {
-      // Legs
-      const legT = (absY - 0.75) / 0.25;
-      radius = 0.12 * (1 - legT);
-    }
-
-    // Add noise for organic feel
-    const noise = 0.6 + 0.4 * Math.random();
     const angle = Math.random() * Math.PI * 2;
-    const r = radius * noise * 0.9;
-
+    const r = 0.01 + 0.02 * Math.random();
     pos[i * 3] = Math.cos(angle) * r;
-    pos[i * 3 + 1] = y;
-    pos[i * 3 + 2] = Math.sin(angle) * r * 0.3; // Flatten on Z
+    pos[i * 3 + 1] = (Math.random() - 0.5) * 0.04;
+    pos[i * 3 + 2] = Math.sin(angle) * r;
   }
   return pos;
 }
@@ -121,18 +95,9 @@ function generateSphere(count: number): Float32Array {
   return pos;
 }
 
-/** Generate a slightly different woman silhouette for woman2. */
+/** Minimal placeholder — same tiny ring. */
 function generateWomanSilhouette2(count: number): Float32Array {
-  const base = generateWomanSilhouette(count);
-  // Shift some weight to one hip for a subtle pose difference
-  for (let i = 0; i < count; i++) {
-    const y = base[i * 3 + 1];
-    const absY = Math.abs(y);
-    if (absY > 0.2 && absY < 0.6) {
-      base[i * 3] += 0.05 * Math.sin(y * Math.PI * 2);
-    }
-  }
-  return base;
+  return generateWomanSilhouette(count);
 }
 
 /** Generate a slightly different man silhouette for man2. */
@@ -156,16 +121,16 @@ export function createParticleData(): ParticleData {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(defaultPos, 3));
 
-  // Per-particle base colors (random pastel)
+  // Per-particle colors: bright cyan — always visible
   const colors = new Float32Array(PARTICLE_COUNT * 3);
   for (let i = 0; i < PARTICLE_COUNT; i++) {
-    const hue = 0.5 + 0.2 * Math.random(); // cyan-blue range
-    colors[i * 3] = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(hue * Math.PI * 2));
-    colors[i * 3 + 1] = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin((hue + 0.33) * Math.PI * 2));
-    colors[i * 3 + 2] = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin((hue + 0.67) * Math.PI * 2));
+    const bright = 0.6 + 0.4 * Math.random();
+    colors[i * 3] = 0.5 * bright;
+    colors[i * 3 + 1] = 0.7 * bright;
+    colors[i * 3 + 2] = 1.0 * bright;
   }
   geometry.setAttribute('color', new BufferAttribute(colors, 3));
-  (geometry.attributes.color as BufferAttribute).setUsage('DynamicDraw');
+  (geometry.attributes.color as BufferAttribute).setUsage(DynamicDrawUsage);
 
   // Per-particle size variation
   const sizes = new Float32Array(PARTICLE_COUNT);
