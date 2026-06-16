@@ -97,6 +97,11 @@
     await flog(`handleSend called, text="${text.substring(0, 50)}", streaming=${streaming}, activeId=${$conversation.activeId}`);
     if (!text || streaming) return;
 
+    // Ensure we have an active conversation before sending
+    if (!$conversation.activeId) {
+      conversation.newConversation();
+    }
+
     inputValue = '';
     resetInputHeight();
 
@@ -208,6 +213,11 @@
     } catch (_) {
       // Backend may not be ready — continue with local state
       loading = false;
+    }
+
+    // Ensure conversation store is initialised (creates a default conversation if empty)
+    if (!$conversation.activeId) {
+      conversation.init();
     }
 
     // Listen for auto-executed command results (Safe commands)

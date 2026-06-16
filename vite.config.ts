@@ -12,6 +12,13 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      ignored: [
+        '**/AppData/**',
+        '**/node_modules/**',
+        '**/.git/**',
+      ],
+    },
   },
 
   // Env variables starting with these prefixes are available to the frontend

@@ -71,6 +71,14 @@
   --font-size-md: 14px;
   --font-size-lg: 16px;
 
+  /* Window / panel surfaces for glass effect */
+  --window-bg: rgba(10, 12, 28, 0.88);
+  --window-bg-expanded: rgba(10, 12, 28, 0.96);
+  --panel-bg: rgba(26, 29, 49, 0.85);
+  --panel-bg-expanded: rgba(26, 29, 49, 0.95);
+  --hud-bg: rgba(10, 12, 28, 0.9);
+  --window-text: #ffffff;
+
   --z-sidebar: 10;
   --z-chat: 20;
   --z-settings: 30;
@@ -80,22 +88,36 @@
 
 /* Light theme overrides */
 [data-theme='light'] {
-  --color-bg: #f5f5fa;
-  --color-bg-secondary: #eeeef8;
-  --color-bg-tertiary: #e0e0f0;
-  --color-surface: #ffffff;
-  --color-surface-hover: #f0f0f8;
+  --color-bg: #e8e8ee;
+  --color-bg-secondary: #dddde5;
+  --color-bg-tertiary: #d2d2dc;
+  --color-surface: #f0f0f6;
+  --color-surface-hover: #e8e8f0;
 
-  --color-text: #1a1a2e;
-  --color-text-secondary: #5a5a7a;
-  --color-text-muted: #8a8aaa;
+  --color-text: #2a2a3e;
+  --color-text-secondary: #6a6a8a;
+  --color-text-muted: #9a9ab0;
 
-  --color-border: #d0d0e0;
+  --color-border: #d0d0dc;
   --color-border-focus: #7b68ee;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+
+  /* Gray window surfaces at 50% opacity */
+  --window-bg: rgba(200, 200, 212, 0.5);
+  --window-bg-expanded: rgba(210, 210, 222, 0.55);
+  --panel-bg: rgba(200, 200, 212, 0.5);
+  --panel-bg-expanded: rgba(210, 210, 222, 0.55);
+  --hud-bg: rgba(200, 200, 212, 0.5);
+  --window-text: #000000;
+}
+
+/* Disable glow rotation in light theme */
+[data-theme='light'] .card-glow {
+  animation: none;
+  opacity: 0;
 }
 
 /* ── Base Reset ─────────────────────────────────────────────────────────── */

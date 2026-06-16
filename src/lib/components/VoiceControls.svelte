@@ -139,7 +139,7 @@
         isSpeaking: status.is_speaking,
       }));
     } catch (_) {
-      // Backend not available or voice not initialised — use defaults
+      setError('Voice backend unavailable. Voice features are disabled.');
     }
 
     // Register global keyboard listeners
@@ -147,7 +147,7 @@
     document.addEventListener('keyup', handleKeyUp);
 
     // Listen for voice events
-    const unlisteners = await Promise.all([
+    const voiceUnlisteners = await Promise.all([
       listenForCaptureStarted(() => {}),
       listenForCaptureStopped(() => {}),
       listenForTranscribed((text) => {
@@ -161,7 +161,7 @@
       }),
       listenForTtsToggled(() => {}),
     ]);
-    unlisteners.forEach((fn) => unlisteners.push(fn));
+    voiceUnlisteners.forEach((fn) => unlisteners.push(fn));
   });
 
   onDestroy(() => {

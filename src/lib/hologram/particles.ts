@@ -2,18 +2,19 @@
  * Particle geometry and morph targets for the holographic avatar.
  *
  * Each "style" is a different set of vertex positions forming a silhouette
- * (woman, man, sphere, etc.). Morphing between styles lerps each particle
- * from its current position to the target.
+ * (woman, man, sphere, head, etc.). Morphing between styles lerps each
+ * particle from its current position to the target.
  *
- * ~6000 particles per avatar. The humanoid silhouettes are generated
- * procedurally from parametric equations (no external mesh required).
+ * ~8000 particles per avatar. Silhouettes are generated procedurally
+ * from parametric equations (no external mesh required).
  */
 
 import { BufferGeometry, BufferAttribute, DynamicDrawUsage } from 'three';
+import { generateFemaleHeadPositions } from './FemaleHead';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type ParticleStyle = 'woman1' | 'woman2' | 'man1' | 'man2' | 'sphere';
+export type ParticleStyle = 'woman1' | 'woman2' | 'man1' | 'man2' | 'sphere' | 'head';
 
 export interface MorphTarget {
   name: string;
@@ -29,7 +30,7 @@ export interface ParticleData {
 
 // ─── Constants ────────────────────────────────────────────────────────
 
-const PARTICLE_COUNT = 6000;
+const PARTICLE_COUNT = 8000;
 
 // ─── Generators ──────────────────────────────────────────────────────
 
@@ -145,12 +146,13 @@ export function createParticleData(): ParticleData {
     man1: generateManSilhouette(PARTICLE_COUNT),
     man2: generateManSilhouette2(PARTICLE_COUNT),
     sphere: generateSphere(PARTICLE_COUNT),
+    head: generateFemaleHeadPositions(PARTICLE_COUNT),
   };
 
   return {
     geometry,
     morphTargets,
-    styles: ['woman1', 'woman2', 'man1', 'man2', 'sphere'],
+    styles: ['woman1', 'woman2', 'man1', 'man2', 'sphere', 'head'],
     defaultStyle: 'woman1',
   };
 }

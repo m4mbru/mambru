@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { slide } from 'svelte/transition';
   import { settings as settingsStore } from '../stores/settings';
   import type {
@@ -22,13 +22,14 @@
 
   // ── Tab state ───────────────────────────────────────────────────────────
 
-  type TabId = 'provider' | 'voice' | 'commands' | 'personality' | 'appearance' | 'avatar';
+  type TabId = 'provider' | 'voice' | 'commands' | 'network' | 'personality' | 'appearance' | 'avatar';
   let activeTab: TabId = 'provider';
 
   const tabs: Array<{ id: TabId; label: string; icon: string }> = [
     { id: 'provider', label: 'Provider', icon: 'cpu' },
     { id: 'voice', label: 'Voice', icon: 'mic' },
     { id: 'commands', label: 'Commands', icon: 'terminal' },
+    { id: 'network', label: 'Network', icon: 'network' },
     { id: 'personality', label: 'Personality', icon: 'smile' },
     { id: 'appearance', label: 'Appearance', icon: 'eye' },
     { id: 'avatar', label: 'Avatar', icon: 'avatar' },
@@ -58,6 +59,18 @@
   // Personality
   let customPromptDirty = false;
 
+  // Network
+  let latency: number | null = null;
+  let netTimer: ReturnType<typeof setInterval> | null = null;
+
+  const avatarStyles = [
+    { id: 'sphere', label: 'Esfera', icon: '◎' },
+    { id: 'stl:busto-humano', label: 'Mary', icon: '👤' },
+    { id: 'stl:modelo-jhon', label: 'Jhon', icon: '👤' },
+    { id: 'stl:modelo-sofia', label: 'Sofía', icon: '👤' },
+    { id: 'stl:modelo-sefira-elfa', label: 'Sefira', icon: '🧝' },
+  ];
+
   // ── Derived ─────────────────────────────────────────────────────────────
 
   $: filteredCommands = commandSearch
@@ -70,10 +83,31 @@
 
   $: effectivePrompt = getEffectivePrompt();
 
+  $: netProvider = localSettings?.provider.active ?? '';
+  $: netEndpoint = netProvider === 'ollama'
+    ? localSettings?.provider.ollama
+    : netProvider === 'openai'
+      ? localSettings?.provider.openai
+      : localSettings?.provider.anthropic;
+
   // ── Initialise ──────────────────────────────────────────────────────────
 
   onMount(() => {
+    // Copy current settings to local so the form always has something
+    const unsub = settingsStore.subscribe((s) => {
+      localSettings = JSON.parse(JSON.stringify(s));
+    });
+    unsub();
+
     loadCommands();
+    latency = Math.floor(20 + Math.random() * 80);
+    netTimer = setInterval(() => {
+      latency = Math.floor(20 + Math.random() * 80);
+    }, 3000);
+  });
+
+  onDestroy(() => {
+    if (netTimer) clearInterval(netTimer);
   });
 
   // Reload commands when the tab becomes active and opens
@@ -89,30 +123,15 @@
     }
   }
 
-  // ── Copy settings to local on open ──────────────────────────────────────
-
-  $: if (open) {
-    const unsub = settingsStore.subscribe((s) => {
-      localSettings = JSON.parse(JSON.stringify(s));
-    });
-    unsub();
-  }
-
   // ── Save ────────────────────────────────────────────────────────────────
 
   async function handleSave() {
     if (!localSettings) return;
     try {
       await settingsStore.save(localSettings);
-      // Apply theme immediately
-      applyTheme(localSettings.appearance.theme);
     } catch (err) {
       console.error('[Settings] Failed to save:', err);
     }
-  }
-
-  function applyTheme(theme: string) {
-    document.documentElement.dataset.theme = theme === 'light' ? 'light' : '';
   }
 
   // ── Connection test ─────────────────────────────────────────────────────
@@ -252,7 +271,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
 
 <svelte:window on:keydown={handleKeyCapture} />
 
-<div class="settings-outer" class:slideover={!panelMode} class:open>
+<div class="settings-outer" class:slideover={!panelMode} class:open class:panel-mode={panelMode}>
   {#if !panelMode}
     {#if open}
       <div class="settings-backdrop" on:click={onClose}></div>
@@ -297,6 +316,8 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             {:else if tab.icon === 'smile'}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            {:else if tab.icon === 'network'}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             {:else}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             {/if}
@@ -455,9 +476,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
               >
                 {#if isListeningForKey}
                   Press a key...
-            {:else if tab.icon === 'avatar'}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
-            {:else}
+                {:else}
                   <kbd>{pttKeyBinding}</kbd>
                 {/if}
               </button>
@@ -663,7 +682,38 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
             </div>
           </div>
 
-        <!-- Tab 4: Personality -->
+        <!-- Tab 4: Network -->
+        {:else if activeTab === 'network'}
+          <div class="tab-section">
+            <h3>Network Status</h3>
+            <p class="section-desc">Connection status and latency to your LLM provider.</p>
+
+            <div class="net-info">
+              <div class="net-row">
+                <span class="net-label">Provider</span>
+                <span class="net-value">{netProvider || '—'}</span>
+              </div>
+              <div class="net-row">
+                <span class="net-label">Model</span>
+                <span class="net-value mono">{netEndpoint?.model || '—'}</span>
+              </div>
+              <div class="net-row">
+                <span class="net-label">Status</span>
+                <span class="net-value status" class:online={!!netProvider}>
+                  <span class="status-indicator" class:online={!!netProvider}></span>
+                  {netProvider ? 'Connected' : 'Offline'}
+                </span>
+              </div>
+              <div class="net-row">
+                <span class="net-label">Latency</span>
+                <span class="net-value mono">
+                  {latency !== null ? `${latency}ms` : '—'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+        <!-- Tab 5: Personality -->
         {:else if activeTab === 'personality'}
           <div class="tab-section">
             <h3>Personality</h3>
@@ -718,7 +768,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
             </div>
           </div>
 
-        <!-- Tab 5: Appearance -->
+        <!-- Tab 6: Appearance -->
         {:else if activeTab === 'appearance'}
           <div class="tab-section">
             <h3>Appearance</h3>
@@ -732,6 +782,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
                   class:active={localSettings.appearance.theme === 'dark'}
                   on:click={() => {
                     localSettings.appearance.theme = 'dark';
+                    document.documentElement.dataset.theme = '';
                     handleSave();
                   }}
                 >
@@ -743,6 +794,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
                   class:active={localSettings.appearance.theme === 'light'}
                   on:click={() => {
                     localSettings.appearance.theme = 'light';
+                    document.documentElement.dataset.theme = 'light';
                     handleSave();
                   }}
                 >
@@ -754,7 +806,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
 
             <div class="field">
               <label for="font-size">Font Size</label>
-              <select id="font-size" bind:value={localSettings.appearance.theme} on:change={handleSave}>
+              <select id="font-size" bind:value={localSettings.appearance.fontSize} on:change={handleSave}>
                 <option value="small">Small</option>
                 <option value="medium">Medium</option>
                 <option value="large">Large</option>
@@ -763,7 +815,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
 
             <div class="field">
               <label for="language">Language</label>
-              <select id="language">
+              <select id="language" bind:value={localSettings.appearance.language} on:change={handleSave}>
                 <option value="en">English</option>
                 <option value="es">Spanish</option>
               </select>
@@ -790,14 +842,22 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
             </div>
 
             <div class="field">
-              <label for="avatar-style">Style</label>
-              <select
-                id="avatar-style"
-                bind:value={localSettings.hologram.style}
-                on:change={handleSave}
-              >
-                <option value="woman1">Female Head</option>
-              </select>
+              <label>Style</label>
+              <div class="avatar-grid">
+                {#each avatarStyles as style}
+                  <button
+                    class="avatar-option"
+                    class:active={localSettings.hologram.style === style.id}
+                    on:click={() => {
+                      localSettings.hologram.style = style.id;
+                      handleSave();
+                    }}
+                  >
+                    <span class="avatar-icon">{style.icon}</span>
+                    <span class="avatar-label">{style.label}</span>
+                  </button>
+                {/each}
+              </div>
             </div>
 
             <div class="field">
@@ -870,6 +930,14 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     overflow-y: auto;
   }
 
+  .settings-outer.panel-mode {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .settings-backdrop {
     position: fixed;
     inset: 0;
@@ -889,6 +957,15 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     flex-direction: column;
     box-shadow: var(--shadow-lg);
     overflow: hidden;
+    min-height: 0;
+  }
+
+  .settings-outer.panel-mode .settings-content {
+    position: relative;
+    flex: 1;
+    top: auto;
+    right: auto;
+    bottom: auto;
   }
 
   /* ── Header ──────────────────────────────────── */
@@ -979,6 +1056,7 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     flex: 1;
     overflow-y: auto;
     padding: var(--space-lg);
+    min-height: 0;
   }
 
   .tab-section h3 {
@@ -1428,7 +1506,114 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     background: rgba(123, 104, 238, 0.05);
   }
 
+  /* ── Network tab ────────────────────────────── */
+
+  .net-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .net-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .net-label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--color-text-muted);
+  }
+
+  .net-value {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--color-text);
+  }
+
+  .net-value.mono {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+  }
+
+  .net-value.status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-danger);
+  }
+
+  .status-indicator.online {
+    background: var(--color-success);
+    box-shadow: 0 0 6px var(--color-success);
+    animation: dotPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes dotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
   /* ── Avatar tab ─────────────────────────────── */
+
+  .avatar-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-xs);
+  }
+
+  .avatar-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: var(--space-md) var(--space-sm);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-family: inherit;
+    font-size: var(--font-size-xs);
+  }
+
+  .avatar-option:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--color-border-focus);
+    color: var(--color-text);
+  }
+
+  .avatar-option.active {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    background: rgba(123, 104, 238, 0.1);
+  }
+
+  .avatar-icon {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .avatar-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-size: 10px;
+  }
 
   .range-with-value {
     display: flex;

@@ -5,21 +5,25 @@ import {
   PointsMaterial,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
   BufferGeometry,
   BufferAttribute,
   LineSegments,
   LineBasicMaterial,
   Color,
+  Vector3,
+  Plane,
   AdditiveBlending,
   DoubleSide,
   CanvasTexture,
   LinearFilter,
   RingGeometry,
   CylinderGeometry,
-  SphereGeometry,
   AmbientLight,
   DirectionalLight,
 } from 'three';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { createHeadMeshGeometry } from './FemaleHead';
 
 const NODE_COUNT = 18;
 const BASE_RADIUS = 0.55;
@@ -47,6 +51,22 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+function makeGradientTex(topColor: string, bottomColor: string, height = 64): CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  const grad = ctx.createLinearGradient(0, 0, 0, height);
+  grad.addColorStop(0, topColor);
+  grad.addColorStop(1, bottomColor);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 2, height);
+  const tex = new CanvasTexture(canvas);
+  tex.minFilter = LinearFilter;
+  tex.magFilter = LinearFilter;
+  return tex;
+}
+
 export class NeuralNetwork {
   private group: Group | null = null;
   private ringGroup: Group | null = null;
@@ -63,8 +83,13 @@ export class NeuralNetwork {
     phase: number;
     line: LineSegments;
   }[] = [];
-  private faceMesh: Mesh | null = null;
+  private faceMesh: Group | Mesh | Points | null = null;
+  private headGroup: Group | null = null;
+  private headMat: MeshStandardMaterial | null = null;
+  private wireMat: MeshBasicMaterial | null = null;
   private faceWire: Mesh | null = null;
+  private headBaseY = 0;
+  private headPhase = 0;
   private emitterMat: MeshBasicMaterial | null = null;
   private orbitalRing: LineSegments | null = null;
   private platformGroup: Group | null = null;
@@ -77,20 +102,21 @@ export class NeuralNetwork {
     this.scene = scene;
   }
 
-  init(): void {
+  async init(): Promise<void> {
     const cyan = new Color('#1A6B7A');
     const group = new Group();
+    this.group = group;
 
-    // ─── Scene lighting for realistic materials ──────────────────
-    const ambient = new AmbientLight(0x404060, 1.2);
+    // ─── Scene lighting — subtle cool light to reveal geometry ───
+    const ambient = new AmbientLight(0x446688, 0.4);
     this.scene.add(ambient);
 
-    const mainLight = new DirectionalLight(0xaaccff, 2.0);
-    mainLight.position.set(1, 2, 3);
+    const mainLight = new DirectionalLight(0xccddff, 1.2);
+    mainLight.position.set(1.5, 2.0, 1.5);
     this.scene.add(mainLight);
 
-    const fillLight = new DirectionalLight(0x4488cc, 0.6);
-    fillLight.position.set(-1, 0.5, -1);
+    const fillLight = new DirectionalLight(0x6688aa, 0.4);
+    fillLight.position.set(-1.0, 0.3, -1.2);
     this.scene.add(fillLight);
 
     // ─── 18 node positions (jittered angle + radius) ───────────────
@@ -127,140 +153,55 @@ export class NeuralNetwork {
     circleTex.minFilter = LinearFilter;
     circleTex.magFilter = LinearFilter;
 
-    // ─── Female face image for hologram center ───────────────────
-    function createFaceTexture(): CanvasTexture {
-      const size = 256;
-      const c = document.createElement('canvas');
-      c.width = size; c.height = size;
-      const x = c.getContext('2d')!;
-
-      const cx = size * 0.45, cy = size * 0.45;
-
-      // Glow aura
-      const aura = x.createRadialGradient(cx, cy, 0, cx, cy, size * 0.55);
-      aura.addColorStop(0, 'rgba(0, 255, 255, 0.08)');
-      aura.addColorStop(0.7, 'rgba(0, 200, 255, 0.03)');
-      aura.addColorStop(1, 'rgba(0, 255, 255, 0)');
-      x.fillStyle = aura;
-      x.fillRect(0, 0, size, size);
-
-      x.strokeStyle = 'rgba(0, 255, 255, 0.55)';
-      x.lineWidth = 2;
-      x.lineCap = 'round';
-      x.lineJoin = 'round';
-
-      // Face oval
-      x.beginPath();
-      x.ellipse(cx, cy, 40, 50, 0, 0, Math.PI * 2);
-      x.stroke();
-
-      // Hair — flowing curves left side
-      x.lineWidth = 2.5;
-      x.strokeStyle = 'rgba(0, 255, 255, 0.5)';
-      x.beginPath();
-      x.moveTo(cx - 38, cy - 45);
-      x.bezierCurveTo(cx - 65, cy - 25, cx - 58, cy + 25, cx - 28, cy + 42);
-      x.stroke();
-
-      // Hair right side
-      x.beginPath();
-      x.moveTo(cx + 38, cy - 45);
-      x.bezierCurveTo(cx + 65, cy - 25, cx + 58, cy + 25, cx + 28, cy + 42);
-      x.stroke();
-
-      // Eyes
-      x.strokeStyle = 'rgba(0, 255, 255, 0.4)';
-      x.lineWidth = 1.8;
-      // Left
-      x.beginPath();
-      x.ellipse(cx - 15, cy - 8, 7, 4, 0, 0, Math.PI * 2);
-      x.stroke();
-      // Right
-      x.beginPath();
-      x.ellipse(cx + 15, cy - 8, 7, 4, 0, 0, Math.PI * 2);
-      x.stroke();
-
-      // Pupils
-      x.fillStyle = 'rgba(0, 255, 255, 0.5)';
-      x.beginPath(); x.arc(cx - 15, cy - 8, 1.8, 0, Math.PI * 2); x.fill();
-      x.beginPath(); x.arc(cx + 15, cy - 8, 1.8, 0, Math.PI * 2); x.fill();
-
-      // Nose
-      x.strokeStyle = 'rgba(0, 255, 255, 0.3)';
-      x.lineWidth = 1.5;
-      x.beginPath();
-      x.moveTo(cx, cy - 2);
-      x.quadraticCurveTo(cx - 3, cy + 8, cx + 1, cy + 10);
-      x.stroke();
-
-      // Lips
-      x.strokeStyle = 'rgba(0, 255, 255, 0.35)';
-      x.lineWidth = 1.5;
-      x.beginPath();
-      x.moveTo(cx - 11, cy + 15);
-      x.quadraticCurveTo(cx, cy + 20, cx + 11, cy + 15);
-      x.stroke();
-
-      // Neck and shoulders
-      x.strokeStyle = 'rgba(0, 255, 255, 0.25)';
-      x.lineWidth = 1.5;
-      x.beginPath();
-      x.moveTo(cx - 10, cy + 47);
-      x.lineTo(cx - 8, cy + 68);
-      x.moveTo(cx + 10, cy + 47);
-      x.lineTo(cx + 8, cy + 68);
-      x.moveTo(cx - 8, cy + 68);
-      x.quadraticCurveTo(cx - 38, cy + 75, cx - 45, cy + 85);
-      x.moveTo(cx + 8, cy + 68);
-      x.quadraticCurveTo(cx + 38, cy + 75, cx + 45, cy + 85);
-      x.stroke();
-
-      const tex = new CanvasTexture(c);
-      tex.minFilter = LinearFilter;
-      tex.magFilter = LinearFilter;
-      return tex;
+    // ─── Load STL bust model (realistic, from MakerWorld) ──────
+    // Falls back to procedural head if STL fails to load.
+    let headGeo: BufferGeometry;
+    try {
+      headGeo = await this.loadStlGeometry('/models/busto-humano.stl');
+    } catch (err) {
+      console.warn('Failed to load STL bust, using procedural head', err);
+      headGeo = createHeadMeshGeometry(36, 30);
+      headGeo.computeVertexNormals();
     }
 
-    const faceTex = createFaceTexture();
-    // 3D face — ellipsoid with holographic texture
-    const faceGeo = new SphereGeometry(0.35, 32, 32);
-    // Stretch vertically for a head shape
-    const facePos = faceGeo.attributes.position.array as Float32Array;
-    for (let i = 0; i < facePos.length; i += 3) {
-      facePos[i + 1] *= 1.25; // taller
-      facePos[i + 2] *= 0.85; // slightly flattened front-back
-    }
-    faceGeo.computeVertexNormals();
-
-    const faceMat = new MeshBasicMaterial({
-      map: faceTex,
+    // Holographic bust — self-illuminated with subtle light revealing contours
+    const headMat = new MeshStandardMaterial({
+      color: 0x3a6a8a,
+      emissive: 0x33ddff,
+      emissiveIntensity: 0.18,
+      roughness: 0.40,
+      metalness: 0.0,
       transparent: true,
-      opacity: 0.35,
-      blending: AdditiveBlending,
-      depthWrite: false,
+      opacity: 0.92,
       side: DoubleSide,
     });
-    const faceMesh = new Mesh(faceGeo, faceMat);
-    faceMesh.position.z = -0.04;
-    group.add(faceMesh);
+    this.headMat = headMat;
+    const headMesh = new Mesh(headGeo, headMat);
 
-    // Wireframe overlay — 3D grid lines for holographic look
+    // Holographic wireframe overlay for that retro sci-fi look
     const wireMat = new MeshBasicMaterial({
-      color: '#33FFFF',
-      wireframe: true,
+      color: 0x226699,
       transparent: true,
-      opacity: 0.08,
+      opacity: 0.06,
       blending: AdditiveBlending,
       depthWrite: false,
+      wireframe: true,
     });
-    const wireMesh = new Mesh(faceGeo.clone(), wireMat);
-    wireMesh.position.z = -0.04;
-    wireMesh.scale.set(1.01, 1.01, 1.01);
-    group.add(wireMesh);
+    this.wireMat = wireMat;
+    const wireMesh = new Mesh(headGeo.clone(), wireMat);
 
-    // Slow rotation in update
-    this.faceMesh = faceMesh;
-    this.faceWire = wireMesh;
+    const bust = new Group();
+    bust.add(headMesh);
+    bust.add(wireMesh);
+    bust.position.set(0, 0.04, 0.0);
+    bust.scale.set(1, 1, 1);
+    this.headGroup = bust;
+    group.add(bust);
+
+    // Floating animation state
+    this.headBaseY = 0.04;
+    this.headPhase = Math.random() * Math.PI * 2;
+    this.faceMesh = bust;
 
     // ─── Nodes ──────────────────────────────────────────────────────
     const nodeColors = new Float32Array(NODE_COUNT * 3);
@@ -291,25 +232,7 @@ export class NeuralNetwork {
     const ringGroup = new Group();
     this.ringGroup = ringGroup;
 
-    // ─── Centre square ──────────────────────────────────────────────
-    const h = 0.1;
-    const sqVerts = new Float32Array([
-      -h, -h, 0,   h, -h, 0,
-       h, -h, 0,   h,  h, 0,
-       h,  h, 0,  -h,  h, 0,
-      -h,  h, 0,  -h, -h, 0,
-    ]);
-    const sqGeo = new BufferGeometry();
-    sqGeo.setAttribute('position', new BufferAttribute(sqVerts, 3));
-
-    const sqMat = new LineBasicMaterial({
-      color: cyan,
-      transparent: true,
-      opacity: 0.7,
-      blending: AdditiveBlending,
-      depthWrite: false,
-    });
-    ringGroup.add(new LineSegments(sqGeo, sqMat));
+    // ─── Centre square (removed — was causing visual noise) ─────
 
     // ─── Helper: create a ring Mesh (thick) ─────────────────────────
     function makeRing(radius: number, opacity: number, thickness = 0.005, color: Color = cyan): Mesh {
@@ -326,10 +249,10 @@ export class NeuralNetwork {
     }
 
     // ─── Inner ring ─────────────────────────────────────────────────
-    ringGroup.add(makeRing(RING_RADIUS, 1.0, 0.003));
+    ringGroup.add(makeRing(RING_RADIUS, 1.0, 0.003, new Color('#33ccdd')));
 
     // ─── Outer ring ─────────────────────────────────────────────────
-    ringGroup.add(makeRing(RING2_RADIUS, 1.0, 0.003));
+    ringGroup.add(makeRing(RING2_RADIUS, 1.0, 0.003, new Color('#33ccdd')));
 
     // ─── 4 cardinal sections between rings (pill shape) ──────────
     const dirAngles = [Math.PI / 2, 0, -Math.PI / 2, Math.PI]; // N, E, S, W
@@ -379,9 +302,9 @@ export class NeuralNetwork {
       fillGeo.setIndex(new BufferAttribute(idxBuf.slice(0, triCount * 3), 1));
 
       const cardinalMat = new MeshBasicMaterial({
-        color: cyan,
+        color: new Color('#33ccdd'),
         transparent: true,
-        opacity: 0.6,
+        opacity: 1.0,
         blending: AdditiveBlending,
         depthWrite: false,
         side: 2,
@@ -493,270 +416,370 @@ export class NeuralNetwork {
       ...makeBeam(),
     }));
 
-    // ─── Cyberpunk 2-tier platform ─────────────────────────────
-    const neonMagenta = '#FF0080';
-    const neonCyan = '#00FFFF';
+    // ─── Realistic white/gray 2-tier platform ──────────────────
     const baseY = -0.74;
     const R = 0.58;
 
     const platformGroup = new Group();
     platformGroup.position.y = baseY;
     platformGroup.rotation.x = -0.18;
-    group.add(platformGroup);
+    // Add directly to scene so platform stays static (doesn't rotate with head group)
+    this.scene.add(platformGroup);
     this.platformGroup = platformGroup;
 
     // ─── Bottom tier ───────────────────────────────────────────
-    const darkMetal = '#0D1117';
-    const darkMetalMat = new MeshBasicMaterial({
-      color: darkMetal, transparent: false, opacity: 1, side: DoubleSide,
+    const lightGray = '#E8E8E8';
+    const midGray = '#C0C0C0';
+    const darkGray = '#909090';
+    const shadowGray = '#606060';
+
+    // Gradient texture for cylinder walls — top lighter, bottom darker (ambient occlusion)
+    const bodyGrad = makeGradientTex('#E2E2E2', '#AEAEAE');
+
+    const bodyMat = new MeshStandardMaterial({
+      color: '#D8D8D8', map: bodyGrad, roughness: 0.5, metalness: 0.35,
+      side: DoubleSide,
     });
-    const metalMat = new MeshBasicMaterial({
-      color: '#161B22', transparent: false, opacity: 1, side: DoubleSide,
+    const topMat = new MeshStandardMaterial({
+      color: lightGray, roughness: 0.45, metalness: 0.25,
+      side: DoubleSide,
+    });
+    const shadowMat = new MeshBasicMaterial({
+      color: shadowGray, side: DoubleSide,
     });
 
-    // Main bottom cylinder (thick, solid)
-    const bottom = new Mesh(new CylinderGeometry(R, R, 0.05, 48), darkMetalMat);
-    bottom.position.y = 0.025;
-    platformGroup.add(bottom);
+    // Main bottom cylinder — side wall with gradient
+    const bottomSide = new Mesh(new CylinderGeometry(R + 0.005, R + 0.005, 0.05, 48, 1, true), bodyMat);
+    bottomSide.position.y = 0.025;
+    platformGroup.add(bottomSide);
 
-    // Bottom neon rim (neonMagenta)
-    const botRim = new Mesh(
-      new RingGeometry(R - 0.025, R + 0.005, 48),
-      new MeshBasicMaterial({ color: neonMagenta, transparent: true, opacity: 0.7, side: DoubleSide, blending: AdditiveBlending, depthWrite: false })
+    // Bottom tier top surface (lighter)
+    const bottomTop = new Mesh(
+      new RingGeometry(0.01, R, 48),
+      topMat
     );
-    botRim.position.y = 0.001;
-    botRim.rotation.x = -Math.PI / 2;
-    platformGroup.add(botRim);
+    bottomTop.position.y = 0.05;
+    bottomTop.rotation.x = -Math.PI / 2;
+    platformGroup.add(bottomTop);
 
-    // Top neon rim of bottom tier (neonMagenta)
-    const topRim = new Mesh(
-      new RingGeometry(R - 0.025, R + 0.005, 48),
-      new MeshBasicMaterial({ color: neonMagenta, transparent: true, opacity: 0.7, side: DoubleSide, blending: AdditiveBlending, depthWrite: false })
+    // Bottom edge bevel (dark shadow line)
+    const botEdge = new Mesh(
+      new RingGeometry(R - 0.006, R + 0.003, 48),
+      shadowMat
     );
-    topRim.position.y = 0.05;
-    topRim.rotation.x = -Math.PI / 2;
-    platformGroup.add(topRim);
+    botEdge.position.y = 0.001;
+    botEdge.rotation.x = -Math.PI / 2;
+    platformGroup.add(botEdge);
 
-    // 8 vertical neon strips on bottom tier wall (thin glowing lines)
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
+    // Top edge bevel (transition ring from side to top surface)
+    const topEdgeBevel = new Mesh(
+      new RingGeometry(R - 0.01, R + 0.005, 48),
+      new MeshStandardMaterial({ color: '#C8C8C8', roughness: 0.5, metalness: 0.3, side: DoubleSide })
+    );
+    topEdgeBevel.position.y = 0.049;
+    topEdgeBevel.rotation.x = -Math.PI / 2;
+    platformGroup.add(topEdgeBevel);
+
+    // Panel lines + vent slits on the side (12 vertical — every 3rd is a vent)
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const isVent = i % 3 === 0;
+      const lineR = R + 0.006;
+      const yBot = 0.002 + (isVent ? 0.004 : 0);
+      const yTop = 0.048 - (isVent ? 0.004 : 0);
       const buf = new Float32Array([
-        Math.cos(a) * R, 0.001, Math.sin(a) * R,
-        Math.cos(a) * R, 0.049, Math.sin(a) * R,
+        Math.cos(a) * lineR, yBot, Math.sin(a) * lineR,
+        Math.cos(a) * lineR, yTop, Math.sin(a) * lineR,
       ]);
       const g = new BufferGeometry();
       g.setAttribute('position', new BufferAttribute(buf, 3));
-      const strip = new LineSegments(g, new LineBasicMaterial({
-        color: neonMagenta, transparent: true, opacity: 0.3, blending: AdditiveBlending,
-      }));
-      platformGroup.add(strip);
+      platformGroup.add(new LineSegments(g, new LineBasicMaterial({
+        color: isVent ? '#606060' : '#A0A0A0', transparent: true, opacity: isVent ? 0.4 : 0.25,
+      })));
     }
 
     // ─── Middle support ring ────────────────────────────────────
     const Rmid = R * 0.75;
+    const midStrutMat = new MeshStandardMaterial({
+      color: midGray, roughness: 0.5, metalness: 0.3, side: DoubleSide,
+    });
     const midStrut = new Mesh(
-      new CylinderGeometry(Rmid + 0.015, Rmid + 0.015, 0.01, 32),
-      new MeshBasicMaterial({ color: '#1C2333', transparent: false, opacity: 1, side: DoubleSide })
+      new CylinderGeometry(Rmid + 0.015, Rmid + 0.015, 0.012, 32, 1, true),
+      midStrutMat
     );
     midStrut.position.y = 0.045;
     platformGroup.add(midStrut);
 
-    // Cyan accent ring on midStrut
-    const midCyan = new Mesh(
-      new RingGeometry(Rmid - 0.01, Rmid + 0.025, 48),
-      new MeshBasicMaterial({ color: neonCyan, transparent: true, opacity: 0.25, side: DoubleSide, blending: AdditiveBlending, depthWrite: false })
+    // Dark shadow under the middle ring (ambient occlusion)
+    const midShadow = new Mesh(
+      new RingGeometry(Rmid - 0.02, Rmid + 0.025, 32),
+      new MeshBasicMaterial({ color: '#505050', transparent: true, opacity: 0.6, side: DoubleSide })
     );
-    midCyan.position.y = 0.05;
-    midCyan.rotation.x = -Math.PI / 2;
-    platformGroup.add(midCyan);
+    midShadow.position.y = 0.041;
+    midShadow.rotation.x = -Math.PI / 2;
+    platformGroup.add(midShadow);
+
+    // Thin highlight ring on top of middle support
+    const midHighlight = new Mesh(
+      new RingGeometry(Rmid + 0.005, Rmid + 0.025, 32),
+      new MeshStandardMaterial({ color: '#E0E0E0', roughness: 0.4, metalness: 0.3, side: DoubleSide })
+    );
+    midHighlight.position.y = 0.051;
+    midHighlight.rotation.x = -Math.PI / 2;
+    platformGroup.add(midHighlight);
 
     // ─── Top tier ──────────────────────────────────────────────
     const R2 = R * 0.62;
-    const top = new Mesh(new CylinderGeometry(R2, R2, 0.035, 36), metalMat);
-    top.position.y = 0.075;
-    platformGroup.add(top);
+    const topWallGrad = makeGradientTex('#CCCCCC', '#B0B0B0');
+    const topWallMat = new MeshStandardMaterial({
+      color: '#C0C0C0', map: topWallGrad, roughness: 0.4, metalness: 0.3,
+      side: DoubleSide,
+    });
+    const topWall = new Mesh(new CylinderGeometry(R2, R2, 0.035, 36, 1, true), topWallMat);
+    topWall.position.y = 0.075;
+    platformGroup.add(topWall);
 
-    // Top tier neon edge (neonMagenta)
-    const topEdge = new Mesh(
-      new RingGeometry(R2 - 0.02, R2 + 0.005, 36),
-      new MeshBasicMaterial({ color: neonMagenta, transparent: true, opacity: 0.6, side: DoubleSide, blending: AdditiveBlending, depthWrite: false })
+    // Top tier surface (bright white-gray, machined feel)
+    const topSurfaceMat = new MeshStandardMaterial({
+      color: '#F0F0F0', roughness: 0.35, metalness: 0.25, side: DoubleSide,
+    });
+    const topSurface = new Mesh(
+      new RingGeometry(0.01, R2, 36),
+      topSurfaceMat
     );
-    topEdge.position.y = 0.093;
-    topEdge.rotation.x = -Math.PI / 2;
-    platformGroup.add(topEdge);
+    topSurface.position.y = 0.093;
+    topSurface.rotation.x = -Math.PI / 2;
+    platformGroup.add(topSurface);
 
-    // Inner recess (sunken center)
+    // Top edge highlight (bright rim)
+    const topHighlight = new Mesh(
+      new RingGeometry(R2 - 0.005, R2 + 0.003, 36),
+      new MeshStandardMaterial({
+        color: '#FFFFFF', roughness: 0.2, metalness: 0.5, side: DoubleSide,
+      })
+    );
+    topHighlight.position.y = 0.094;
+    topHighlight.rotation.x = -Math.PI / 2;
+    platformGroup.add(topHighlight);
+
+    // Outer edge bevel on top surface (transition ring)
+    const outerBevel = new Mesh(
+      new RingGeometry(R2 - 0.015, R2 - 0.003, 36),
+      new MeshStandardMaterial({ color: '#E0E0E0', roughness: 0.4, metalness: 0.3, side: DoubleSide })
+    );
+    outerBevel.position.y = 0.092;
+    outerBevel.rotation.x = -Math.PI / 2;
+    platformGroup.add(outerBevel);
+
+    // Inner recess (sunken center) — darker wall for depth
     const innerR = R2 * 0.65;
+    const recessMat = new MeshStandardMaterial({
+      color: '#505050', roughness: 0.8, metalness: 0.2, side: DoubleSide,
+    });
     const recess = new Mesh(
-      new CylinderGeometry(innerR, innerR, 0.01, 32),
-      new MeshBasicMaterial({ color: '#0A0D14', transparent: false, opacity: 1, side: DoubleSide })
+      new CylinderGeometry(innerR, innerR, 0.012, 32, 1, true),
+      recessMat
     );
     recess.position.y = 0.087;
     platformGroup.add(recess);
 
-    // Neon ring inside recess (neonCyan)
-    const recessNeon = new Mesh(
-      new RingGeometry(innerR - 0.015, innerR + 0.005, 32),
-      new MeshBasicMaterial({ color: neonCyan, transparent: true, opacity: 0.4, side: DoubleSide, blending: AdditiveBlending, depthWrite: false })
+    // Recess floor (deep shadow)
+    const recessFloorMat = new MeshStandardMaterial({
+      color: '#383838', roughness: 0.9, metalness: 0.1, side: DoubleSide,
+    });
+    const recessFloor = new Mesh(
+      new RingGeometry(0.01, innerR, 32),
+      recessFloorMat
     );
-    recessNeon.position.y = 0.092;
-    recessNeon.rotation.x = -Math.PI / 2;
-    platformGroup.add(recessNeon);
+    recessFloor.position.y = 0.092;
+    recessFloor.rotation.x = -Math.PI / 2;
+    platformGroup.add(recessFloor);
 
-    // Grid lines in recess (radial + concentric)
+    // Subtle grid lines in recess (very faint white-gray)
     for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2;
-      const buf = new Float32Array([0, 0.092, 0, Math.cos(a) * innerR * 0.9, 0.092, Math.sin(a) * innerR * 0.9]);
+      const buf = new Float32Array([0, 0.093, 0, Math.cos(a) * innerR * 0.85, 0.093, Math.sin(a) * innerR * 0.85]);
       const g = new BufferGeometry();
       g.setAttribute('position', new BufferAttribute(buf, 3));
       platformGroup.add(new LineSegments(g, new LineBasicMaterial({
-        color: neonCyan, transparent: true, opacity: 0.08, blending: AdditiveBlending,
+        color: '#808080', transparent: true, opacity: 0.12,
       })));
     }
     // 3 concentric circles in recess
     for (let r = 1; r <= 3; r++) {
-      const radius = (innerR * 0.9) * (r / 3);
+      const radius = (innerR * 0.85) * (r / 3);
       const pts = 24;
       const buf = new Float32Array(pts * 3 + 3);
       for (let i = 0; i <= pts; i++) {
         const a = (i / pts) * Math.PI * 2;
         buf[i * 3] = Math.cos(a) * radius;
-        buf[i * 3 + 1] = 0.092;
+        buf[i * 3 + 1] = 0.093;
         buf[i * 3 + 2] = Math.sin(a) * radius;
       }
       const g = new BufferGeometry();
       g.setAttribute('position', new BufferAttribute(buf, 3));
       platformGroup.add(new LineSegments(g, new LineBasicMaterial({
-        color: neonCyan, transparent: true, opacity: 0.06, blending: AdditiveBlending,
+        color: '#707070', transparent: true, opacity: 0.08 + 0.04 * (r % 2),
+      })));
+    }
+    // Radial alignment marks in recess (12 tiny tick lines)
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const inner = innerR * 0.75;
+      const outer = innerR * 0.85;
+      const buf = new Float32Array([
+        Math.cos(a) * inner, 0.093, Math.sin(a) * inner,
+        Math.cos(a) * outer, 0.093, Math.sin(a) * outer,
+      ]);
+      const g = new BufferGeometry();
+      g.setAttribute('position', new BufferAttribute(buf, 3));
+      platformGroup.add(new LineSegments(g, new LineBasicMaterial({
+        color: '#606060', transparent: true, opacity: 0.12,
       })));
     }
 
-    // ─── Core emitter (pulsing) ─────────────────────────────────
+    // ─── Core emitter (white, subtle) ──────────────────────────
     const emitterMat = new MeshBasicMaterial({
-      color: '#FFFFFF', transparent: true, opacity: 0.6,
+      color: '#FFFFFF', transparent: true, opacity: 0.5,
       side: DoubleSide, blending: AdditiveBlending, depthWrite: false,
     });
-    const emitterRing = new Mesh(new RingGeometry(innerR * 0.28, innerR * 0.35, 24), emitterMat);
+    const emitterRing = new Mesh(new RingGeometry(innerR * 0.25, innerR * 0.32, 24), emitterMat);
     emitterRing.position.y = 0.094;
     emitterRing.rotation.x = -Math.PI / 2;
     platformGroup.add(emitterRing);
     this.emitterMat = emitterMat;
 
-    // ─── Projector light beam ─────────────────────────────────
-    const beamHeight = 0.65;
-    const beamTopR = 0.75;
-    const beamBottomR = 0.04;
+    // ─── Light beam (wide cone, diffused from base to top) ─────────
+    const beamH = 0.35;
+    const beamBotR = 0.02;    // base sale angosto
+    const beamTopR = 0.80;    // se expande bien abierto al centro de la figura
 
-    // Gradient texture: opaque at bottom → transparent at top
-    const gradCanvas = document.createElement('canvas');
-    gradCanvas.width = 2;
-    gradCanvas.height = 64;
-    const beamCtx = gradCanvas.getContext('2d')!;
-    const beamGrad = beamCtx.createLinearGradient(0, 0, 0, 64);
-    beamGrad.addColorStop(0.0, 'rgba(255,255,255,1)');
-    beamGrad.addColorStop(0.5, 'rgba(255,255,255,0.6)');
-    beamGrad.addColorStop(0.85, 'rgba(255,255,255,0.15)');
-    beamGrad.addColorStop(1.0, 'rgba(255,255,255,0)');
-    beamCtx.fillStyle = beamGrad;
-    beamCtx.fillRect(0, 0, 2, 64);
-    const alphaTex = new CanvasTexture(gradCanvas);
-
-    // Main cone beam (soft, wide, fades toward top)
-    const beamMat = new MeshBasicMaterial({
-      color: neonCyan, transparent: true, opacity: 0.04,
-      alphaMap: alphaTex, side: DoubleSide,
-      blending: AdditiveBlending, depthWrite: false,
-    });
-    const beam = new Mesh(new CylinderGeometry(beamTopR, beamBottomR, beamHeight, 28, 1, true), beamMat);
-    beam.position.y = 0.1 + beamHeight / 2;
-    platformGroup.add(beam);
-
-    // Inner brighter core beam (fades faster toward top)
-    const coreAlphaTex = alphaTex.clone();
-    const coreBeamMat = new MeshBasicMaterial({
-      color: '#88EEFF', transparent: true, opacity: 0.03,
-      alphaMap: coreAlphaTex, side: DoubleSide,
-      blending: AdditiveBlending, depthWrite: false,
-    });
-    const coreBeam = new Mesh(new CylinderGeometry(beamTopR * 0.3, beamBottomR * 0.5, beamHeight * 0.85, 20, 1, true), coreBeamMat);
-    coreBeam.position.y = 0.1 + beamHeight * 0.46;
-    platformGroup.add(coreBeam);
-
-    // 8 light rays
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      const endR = beamTopR * (0.4 + Math.random() * 0.5);
-      const bx = Math.cos(a);
-      const bz = Math.sin(a);
+    // 3. Wireframe cage — 12 vertical lines forming a cone boundary
+    const cageSegments = 12;
+    for (let i = 0; i < cageSegments; i++) {
+      const a = (i / cageSegments) * Math.PI * 2;
+      const cx = Math.cos(a);
+      const sz = Math.sin(a);
       const buf = new Float32Array([
-        bx * beamBottomR, 0.1, bz * beamBottomR,
-        bx * endR, 0.6, bz * endR,
+        cx * beamBotR, 0.1, sz * beamBotR,
+        cx * beamTopR, 0.1 + beamH, sz * beamTopR,
       ]);
       const g = new BufferGeometry();
       g.setAttribute('position', new BufferAttribute(buf, 3));
       platformGroup.add(new LineSegments(g, new LineBasicMaterial({
-        color: neonCyan, transparent: true, opacity: 0.025,
+        color: '#FFFFFF', transparent: true, opacity: 0.06,
         blending: AdditiveBlending, depthWrite: false,
       })));
     }
 
-    // Diffuse glow ring near the top (where beam meets the figure)
-    const glowRing = new Mesh(
-      new RingGeometry(beamTopR * 0.2, beamTopR, 32),
-      new MeshBasicMaterial({ color: neonCyan, transparent: true, opacity: 0.015, side: DoubleSide, blending: AdditiveBlending, depthWrite: false })
-    );
-    glowRing.position.y = 0.6;
-    glowRing.rotation.x = -Math.PI / 2;
-    platformGroup.add(glowRing);
+    // 4. Gradient glow mesh (semi-transparent cone filling the beam volume)
+    const glowVerts: number[] = [];
+    const glowIdx: number[] = [];
+    const glowSegs = 24;
+    for (let i = 0; i <= glowSegs; i++) {
+      const a = (i / glowSegs) * Math.PI * 2;
+      const cx = Math.cos(a);
+      const sz = Math.sin(a);
+      // Bottom ring
+      glowVerts.push(cx * beamBotR, 0.1, sz * beamBotR);
+      // Top ring (offset by glowSegs+1)
+      glowVerts.push(cx * beamTopR, 0.1 + beamH, sz * beamTopR);
+    }
+    for (let i = 0; i < glowSegs; i++) {
+      const b = i * 2;
+      const t = b + 1;
+      const bNext = (i + 1) * 2;
+      const tNext = bNext + 1;
+      glowIdx.push(b, t, bNext);
+      glowIdx.push(t, tNext, bNext);
+    }
+    // UVs: 0 en base (opaco), 1 en tope (transparente)
+    const glowUvs: number[] = [];
+    for (let i = 0; i <= glowSegs; i++) {
+      const u = i / glowSegs;
+      glowUvs.push(u, 0);  // bottom ring → UV.y = 0
+      glowUvs.push(u, 1);  // top ring → UV.y = 1
+    }
+    const glowGeo = new BufferGeometry();
+    glowGeo.setAttribute('position', new BufferAttribute(new Float32Array(glowVerts), 3));
+    glowGeo.setAttribute('uv', new BufferAttribute(new Float32Array(glowUvs), 2));
+    glowGeo.setIndex(glowIdx);
+    glowGeo.computeVertexNormals();
 
-    // ─── Cyberpunk details ──────────────────────────────────────
-    // 6 angled struts supporting top tier
+    // Gradient texture: black (transparent) arriba, white (opaco) abajo
+    const alphaTex = makeGradientTex('#000000', '#ffffff', 128);
+    const glowMat = new MeshBasicMaterial({
+      color: 0x88bbff,
+      transparent: true,
+      opacity: 0.12,
+      alphaMap: alphaTex,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      side: DoubleSide,
+    });
+    const glowMesh = new Mesh(glowGeo, glowMat);
+    platformGroup.add(glowMesh);
+
+    // (anillos eliminados — solo glow volumétrico)
+
+
+    // ─── Platform details (gray tones) ──────────────────────────
+    // 6 angled struts supporting top tier (cylinder meshes for real volume)
+    const strutMat = new MeshStandardMaterial({
+      color: '#A0A0A0', roughness: 0.6, metalness: 0.4,
+    });
+    const startY = 0.04;
+    const endY = 0.065;
+    const dy = endY - startY;
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
       const cx = Math.cos(a);
       const sz = Math.sin(a);
-      const buf = new Float32Array([
-        cx * R * 0.85, 0.04, sz * R * 0.85,
-        cx * R2 * 0.9, 0.065, sz * R2 * 0.9,
-      ]);
-      const g = new BufferGeometry();
-      g.setAttribute('position', new BufferAttribute(buf, 3));
-      platformGroup.add(new LineSegments(g, new LineBasicMaterial({
-        color: neonMagenta, transparent: true, opacity: 0.15, blending: AdditiveBlending,
-      })));
+      const x1 = cx * R * 0.85;
+      const z1 = sz * R * 0.85;
+      const x2 = cx * R2 * 0.9;
+      const z2 = sz * R2 * 0.9;
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      const len = Math.sqrt(dist * dist + dy * dy);
+      const strut = new Mesh(new CylinderGeometry(0.005, 0.005, len, 6), strutMat);
+      strut.position.set((x1 + x2) / 2, (startY + endY) / 2, (z1 + z2) / 2);
+      const dir = new Vector3(dx, dy, dz).normalize();
+      strut.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), dir);
+      platformGroup.add(strut);
     }
 
-    // Small data nodes around top tier edge
+    // Small screws on top surface ring (between outer edge and recess)
+    const screwMat = new MeshStandardMaterial({
+      color: '#B8B8B8', roughness: 0.25, metalness: 0.7,
+    });
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const screwR = (R2 + innerR) / 2;
+      const screw = new Mesh(
+        new CylinderGeometry(0.008, 0.01, 0.003, 8),
+        screwMat
+      );
+      screw.position.set(Math.cos(a) * screwR, 0.0945, Math.sin(a) * screwR);
+      platformGroup.add(screw);
+    }
+
+    // Small metallic pins around top tier edge
+    const pinMat = new MeshStandardMaterial({
+      color: '#D0D0D0', roughness: 0.3, metalness: 0.6,
+    });
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
       const dot = new Mesh(
-        new CylinderGeometry(0.006, 0.008, 0.008, 6),
-        new MeshBasicMaterial({ color: neonCyan, transparent: true, opacity: 0.5, blending: AdditiveBlending })
+        new CylinderGeometry(0.005, 0.007, 0.006, 6),
+        pinMat
       );
       dot.position.set(Math.cos(a) * (R2 + 0.005), 0.088, Math.sin(a) * (R2 + 0.005));
       platformGroup.add(dot);
     }
 
-    // Floating holographic ring (orbital)
-    const orbPts = 36;
-    const orbBuf = new Float32Array(orbPts * 3);
-    for (let i = 0; i < orbPts; i++) {
-      const a = (i / orbPts) * Math.PI * 2;
-      orbBuf[i * 3] = Math.cos(a) * (innerR * 0.6);
-      orbBuf[i * 3 + 1] = Math.sin(a) * 0.02;
-      orbBuf[i * 3 + 2] = Math.sin(a) * (innerR * 0.6);
-    }
-    const orbGeo = new BufferGeometry();
-    orbGeo.setAttribute('position', new BufferAttribute(orbBuf, 3));
-    const orbMat = new LineBasicMaterial({
-      color: neonCyan, transparent: true, opacity: 0.25,
-      blending: AdditiveBlending, depthWrite: false,
-    });
-    this.orbitalRing = new LineSegments(orbGeo, orbMat);
-    this.orbitalRing.position.y = 0.11;
-    platformGroup.add(this.orbitalRing);
-
-    // ─── Dust particles (sparks in the glow) ────────────────────
+    // ─── Dust particles (floating motes in the light) ──────────
     const DUST_COUNT = 60;
     const dustPos = new Float32Array(DUST_COUNT * 3);
     const dustSpeeds = new Float32Array(DUST_COUNT);
@@ -776,7 +799,7 @@ export class NeuralNetwork {
     const dustGeo = new BufferGeometry();
     dustGeo.setAttribute('position', new BufferAttribute(dustPos, 3));
     const dustMat = new PointsMaterial({
-      color: '#FF66AA', size: 0.008, transparent: true, opacity: 0.4,
+      color: '#FFFFFF', size: 0.006, transparent: true, opacity: 0.25,
       blending: AdditiveBlending, depthWrite: false, sizeAttenuation: true,
     });
     this.dustParticles = new Points(dustGeo, dustMat);
@@ -789,12 +812,109 @@ export class NeuralNetwork {
     this.scene.add(group);
   }
 
+  /** Load an STL, rotate Z-up → Y-up, center XZ, scale, and return geometry. */
+  private async loadStlGeometry(url: string): Promise<BufferGeometry> {
+    const loader = new STLLoader();
+    const geo = await loader.loadAsync(url);
+
+    // STL uses Z-up (3D printing convention), Three.js uses Y-up.
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      pos.setXYZ(i, x, z, -y);
+    }
+    pos.needsUpdate = true;
+
+    // Auto-scale & center X/Z. Keep Y offset so the head sits at the right height.
+    geo.computeBoundingBox();
+    const box = geo.boundingBox!;
+    const center = new Vector3();
+    box.getCenter(center);
+    const size = new Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const targetScale = maxDim > 0 ? 0.85 / maxDim : 1;
+    const scaledTopY = box.max.y * targetScale;
+    const yOffset = 0.38 - scaledTopY;
+
+    for (let i = 0; i < pos.count; i++) {
+      pos.setXYZ(i,
+        (pos.getX(i) - center.x) * targetScale,
+        pos.getY(i) * targetScale + yOffset,
+        (pos.getZ(i) - center.z) * targetScale,
+      );
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  /** Switch the STL model at runtime — replaces the bust mesh.
+   *  @param url  Path to the STL file.
+   *  @param clipBottomY  If set, clips geometry below this Y (world space) using a clipping plane.
+   */
+  async setModel(url: string, clipBottomY?: number): Promise<void> {
+    if (!this.headGroup || !this.headMat || !this.wireMat) return;
+
+    try {
+      const geo = await this.loadStlGeometry(url);
+
+      // Remove old meshes from the head group
+      while (this.headGroup.children.length > 0) {
+        const child = this.headGroup.children[0];
+        if (child instanceof Mesh) {
+          child.geometry.dispose();
+        }
+        this.headGroup.remove(child);
+      }
+
+      // Build meshes — clone materials when we need clipping so other models stay unclipped
+      if (clipBottomY !== undefined) {
+        // Keep everything above clipBottomY, clip below
+        const clipPlane = new Plane(new Vector3(0, 1, 0), -clipBottomY);
+        const clipHeadMat = this.headMat.clone();
+        clipHeadMat.clippingPlanes = [clipPlane];
+        clipHeadMat.clipShadows = true;
+        const clipWireMat = this.wireMat.clone();
+        clipWireMat.clippingPlanes = [clipPlane];
+        clipWireMat.clipShadows = true;
+
+        const headMesh = new Mesh(geo, clipHeadMat);
+        const wireMesh = new Mesh(geo.clone(), clipWireMat);
+        this.headGroup.add(headMesh);
+        this.headGroup.add(wireMesh);
+      } else {
+        const headMesh = new Mesh(geo, this.headMat);
+        const wireMesh = new Mesh(geo.clone(), this.wireMat);
+        this.headGroup.add(headMesh);
+        this.headGroup.add(wireMesh);
+      }
+    } catch (err) {
+      console.warn(`Failed to load model: ${url}`, err);
+    }
+  }
+
+  /** Remove the current STL model from the head group (leaves the group empty).
+   *  Call this when switching to a non-STL style like sphere particles. */
+  clearModel(): void {
+    if (!this.headGroup) return;
+    while (this.headGroup.children.length > 0) {
+      const child = this.headGroup.children[0];
+      if (child instanceof Mesh) {
+        child.geometry.dispose();
+      }
+      this.headGroup.remove(child);
+    }
+  }
+
   update(delta: number, elapsed: number): void {
     if (!this.nodeMat) return;
     this.nodeMat.opacity = 0.55 + 0.3 * Math.sin(elapsed * PULSE_SPEED);
 
     // Pulse cardinal sections
-    const cardPulse = 0.35 + 0.25 * Math.sin(elapsed * 1.2);
+    const cardPulse = 0.55 + 0.30 * Math.sin(elapsed * 1.2);
     for (const m of this.cardinalMats) {
       m.opacity = cardPulse;
     }
@@ -848,10 +968,8 @@ export class NeuralNetwork {
       }
     }
 
-    if (this.group) {
-      this.group.rotation.z += delta * 0.03;
-    }
     if (this.ringGroup) {
+      // Rings gently counter-rotate for visual depth
       this.ringGroup.rotation.z -= delta * 0.06;
     }
 
@@ -860,6 +978,9 @@ export class NeuralNetwork {
     if (this.emitterMat) {
       this.emitterMat.opacity = 0.35 + 0.2 * Math.sin(elapsed * 1.5);
     }
+
+    // ─── Holographic head — static ──────────────────────────────
+    // (Material values are set at creation; no runtime pulse needed.)
 
     // Platform gentle breathing
     if (this.platformGroup) {
@@ -895,12 +1016,15 @@ export class NeuralNetwork {
       this.dustParticles.geometry.attributes.position.needsUpdate = true;
     }
 
-    // ─── 3D face rotation ────────────────────────────────────────
+    // ─── Head floating animation ─────────────────────────────────
     if (this.faceMesh) {
-      this.faceMesh.rotation.y += delta * 0.25;
-    }
-    if (this.faceWire) {
-      this.faceWire.rotation.y += delta * 0.25;
+      // Gentle vertical bob + subtle sway — like the HUD cards
+      const floatY = Math.sin(elapsed * 0.6 + this.headPhase) * 0.025;
+      const floatX = Math.sin(elapsed * 0.3 + this.headPhase * 1.3) * 0.01;
+      const floatTilt = Math.sin(elapsed * 0.4 + this.headPhase * 0.7) * 0.02;
+      this.faceMesh.position.y = this.headBaseY + floatY;
+      this.faceMesh.position.x = floatX;
+      this.faceMesh.rotation.z = floatTilt;
     }
   }
 
@@ -911,7 +1035,7 @@ export class NeuralNetwork {
         if (child instanceof Points || child instanceof LineSegments || child instanceof Mesh) {
           child.geometry.dispose();
           if (child.material) {
-            (child.material as PointsMaterial | LineBasicMaterial | MeshBasicMaterial).dispose();
+            (child.material as PointsMaterial | LineBasicMaterial | MeshBasicMaterial | MeshStandardMaterial).dispose();
           }
         }
       });

@@ -29,6 +29,8 @@ export interface VoiceConfig {
 
 export interface AppearanceConfig {
   theme: string;
+  fontSize: string;
+  language: string;
 }
 
 export interface HologramConfig {
@@ -59,6 +61,26 @@ export interface Settings {
 
 // ── Defaults ──────────────────────────────────────────────────────────────
 
+const STORAGE_KEY = 'mambru-settings';
+
+function loadFromStorage(): Settings | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // localStorage not available or corrupted
+  }
+  return null;
+}
+
+function saveToStorage(settings: Settings): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // localStorage not available
+  }
+}
+
 function defaultSettings(): Settings {
   return {
     provider: {
@@ -68,39 +90,44 @@ function defaultSettings(): Settings {
       ollama: { base_url: 'http://localhost:11434', model: 'llama3' },
     },
     voice: { enabled: true, ptt_key: 'V', tts_enabled: true },
-    appearance: { theme: 'dark' },
+    appearance: { theme: 'dark', fontSize: 'medium', language: 'en' },
     personality: { preset: 'default', custom_prompt: '' },
     search: { provider: 'tavily', api_key: '' },
-    hologram: { enabled: true, style: 'sphere', size: 200, position: 'floating' },
+    hologram: { enabled: true, style: 'stl:modelo-sofia', size: 200, position: 'floating' },
   };
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────
 
 function createSettingsStore() {
-  const { subscribe, set, update } = writable<Settings>(defaultSettings());
+  const initial = loadFromStorage() ?? defaultSettings();
+  const { subscribe, set, update } = writable<Settings>(initial);
 
   return {
     subscribe,
 
-    /** Load settings from the Rust backend via IPC. */
+    /** Load settings from localStorage and optionally the Rust backend. */
     async load(): Promise<void> {
+      const stored = loadFromStorage();
+      if (stored) set(stored);
+
       try {
-        const settings = await invoke<Settings>('get_settings');
-        set(settings);
-      } catch (err) {
-        console.error('[settings] failed to load from backend, using defaults:', err);
-        set(defaultSettings());
+        const backend = await invoke<Settings>('get_settings');
+        set(backend);
+        saveToStorage(backend);
+      } catch {
+        // backend not available — localStorage is enough
       }
     },
 
-    /** Persist settings to disk via the Rust backend. */
+    /** Persist settings to localStorage + try Rust backend. */
     async save(settings: Settings): Promise<void> {
+      set(settings);
+      saveToStorage(settings);
       try {
         await invoke('set_settings', { settings });
-        set(settings);
-      } catch (err) {
-        console.error('[settings] failed to save:', err);
+      } catch {
+        // backend not available — localStorage fallback is already saved
       }
     },
 
@@ -111,7 +138,13 @@ function createSettingsStore() {
         current = { ...s, ...partial };
         return current;
       });
-      await invoke('set_settings', { settings: current });
+      set(current);
+      saveToStorage(current);
+      try {
+        await invoke('set_settings', { settings: current });
+      } catch {
+        // backend not available
+      }
     },
   };
 }

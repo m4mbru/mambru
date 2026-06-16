@@ -105,6 +105,7 @@ export class HologramEngine {
       alpha: true,
       antialias: true,
     });
+    this.renderer.localClippingEnabled = true;
 
     const pixelRatio = this.options.pixelRatio ?? devicePixelRatio;
     this.renderer.setPixelRatio(pixelRatio);
@@ -165,7 +166,15 @@ export class HologramEngine {
     const targets = this.particleData.morphTargets;
     if (targets[style] && style !== this.currentStyle) {
       this.currentStyle = style;
+      this.adjustMaterialForStyle(style);
     }
+    // Show particles when switching to a particle style
+    if (this.particles) this.particles.visible = true;
+  }
+
+  /** Hide or show the particle system (used when switching to STL models). */
+  setParticlesVisible(visible: boolean): void {
+    if (this.particles) this.particles.visible = visible;
   }
 
   /** Immediately snap to a style (no morph animation). */
@@ -174,6 +183,19 @@ export class HologramEngine {
     if (targets[style] && this.particles) {
       this.currentStyle = style;
       snapToStyle(this.particleData.geometry, targets[style]);
+      this.adjustMaterialForStyle(style);
+    }
+  }
+
+  /** Bump opacity & size for defined styles like 'head' so they're actually visible. */
+  private adjustMaterialForStyle(style: ParticleStyle): void {
+    if (!this.material) return;
+    if (style === 'head') {
+      this.material.opacity = 0.6;
+      this.material.size = this.originalParticleSize * 2.5;
+    } else {
+      this.material.opacity = 0.15;
+      this.material.size = this.originalParticleSize;
     }
   }
 
