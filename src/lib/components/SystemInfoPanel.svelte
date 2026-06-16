@@ -45,9 +45,9 @@
       const s = tick % 60;
       uptime = `${h}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
 
-      // @ts-ignore
-      if (performance.memory) {
-        const mem = performance.memory;
+      // performance.memory is not available in all browsers; guard and use any to satisfy TS
+      if ((performance as any).memory) {
+        const mem = (performance as any).memory;
         heapUsed = (mem.usedJSHeapSize / 1024 / 1024).toFixed(0) + ' MB';
         heapTotal = (mem.jsHeapSizeLimit / 1024 / 1024).toFixed(0) + ' MB';
       }

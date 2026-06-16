@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { hudState, collapsePanel, expandPanel, PANEL_ORDER } from '../stores/hud';
-  import type { PanelId } from '../stores/hud';
 
   $: isExpanded = $hudState.mode === 'expanded' || $hudState.mode === 'expanding';
 

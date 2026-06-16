@@ -81,15 +81,18 @@
   <div
     class="dialog-overlay"
     on:click|self={close}
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="download-dialog-title"
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => e.key === 'Escape' && close()}
     in:fly={{ y: 20, duration: 150 }}
     out:fly={{ y: 20, duration: 100 }}
   >
     <!-- Dialog -->
     <div
       class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="download-dialog-title"
       in:scale={{ start: 0.95, duration: 150 }}
       out:scale={{ start: 0.95, duration: 100 }}
     >
@@ -105,7 +108,7 @@
       <div class="dialog-body">
         {#if $isDownloading || downloadingModels.length > 0}
           <!-- Downloading state -->
-          {#each $modelStates as state}
+          {#each Object.values($modelStates) as state}
             {#if state.status === 'downloading'}
               <div class="model-item">
                 <div class="model-info">

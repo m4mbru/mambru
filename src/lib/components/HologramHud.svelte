@@ -20,7 +20,6 @@
   };
 
   const CARD_W = 170;
-  const CARD_H = 0;
 
   const cards = [
     { id: 'clock' as const, title: 'Clock', component: ClockCard, showContent: true },

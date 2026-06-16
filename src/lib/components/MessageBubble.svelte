@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  
   import { marked } from 'marked';
   import hljs from 'highlight.js';
   import type { Message } from '../stores/conversation';
@@ -13,7 +13,6 @@
 
   let renderedHTML = '';
   let showTimestamp = false;
-  let expandedCodeBlocks: Set<number> = new Set();
 
   // ── Configure marked with highlight.js ──────────────────────────────────
 
@@ -51,24 +50,6 @@
 
   // ── Copy code block ─────────────────────────────────────────────────────
 
-  async function copyCodeBlock(index: number): Promise<void> {
-    // Extract code from the nth <code> block in content
-    const blocks = message.content.split('```');
-    // Even indexes are non-code, odd indexes are fenced code
-    let codeIndex = 0;
-    for (let i = 1; i < blocks.length; i += 2) {
-      if (codeIndex === index) {
-        const code = blocks[i].replace(/^[^\n]*\n?/, ''); // strip language tag line
-        try {
-          await navigator.clipboard.writeText(code);
-        } catch (_) {
-          // fallback: could show a message
-        }
-        return;
-      }
-      codeIndex++;
-    }
-  }
 
   // ── Time formatting ─────────────────────────────────────────────────────
 
@@ -88,8 +69,8 @@
 
 <div
   class="message-bubble {message.role === 'user' ? 'user' : 'assistant'} {isStreaming ? 'streaming' : ''}"
-  onmouseenter={() => (showTimestamp = true)}
-  onmouseleave={() => (showTimestamp = false)}
+  on:mouseenter={() => (showTimestamp = true)}
+  on:mouseleave={() => (showTimestamp = false)}
   role="listitem"
   aria-label="{message.role} message"
 >
