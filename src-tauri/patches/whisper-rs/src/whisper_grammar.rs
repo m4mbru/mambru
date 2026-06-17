@@ -5,24 +5,23 @@ use whisper_rs_sys::{
     whisper_gretype_WHISPER_GRETYPE_RULE_REF,
 };
 
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum WhisperGrammarElementType {
     /// End of rule definition
-    End = whisper_gretype_WHISPER_GRETYPE_END as u32,
+    End = whisper_gretype_WHISPER_GRETYPE_END as i32,
     /// Start of alternate definition for a rule
-    Alternate = whisper_gretype_WHISPER_GRETYPE_ALT as u32,
+    Alternate = whisper_gretype_WHISPER_GRETYPE_ALT as i32,
     /// Non-terminal element: reference to another rule
-    RuleReference = whisper_gretype_WHISPER_GRETYPE_RULE_REF as u32,
+    RuleReference = whisper_gretype_WHISPER_GRETYPE_RULE_REF as i32,
     /// Terminal element: character (code point)
-    Character = whisper_gretype_WHISPER_GRETYPE_CHAR as u32,
+    Character = whisper_gretype_WHISPER_GRETYPE_CHAR as i32,
     /// Inverse of a character(s)
-    NotCharacter = whisper_gretype_WHISPER_GRETYPE_CHAR_NOT as u32,
+    NotCharacter = whisper_gretype_WHISPER_GRETYPE_CHAR_NOT as i32,
     /// Modifies a preceding [Self::Character] to be an inclusive range
-    CharacterRangeUpper = whisper_gretype_WHISPER_GRETYPE_CHAR_RNG_UPPER as u32,
+    CharacterRangeUpper = whisper_gretype_WHISPER_GRETYPE_CHAR_RNG_UPPER as i32,
     /// Modifies a preceding [Self::Character] to add an alternate character to match
-    CharacterAlternate = whisper_gretype_WHISPER_GRETYPE_CHAR_ALT as u32,
+    CharacterAlternate = whisper_gretype_WHISPER_GRETYPE_CHAR_ALT as i32,
 }
 
 impl From<whisper_rs_sys::whisper_gretype> for WhisperGrammarElementType {

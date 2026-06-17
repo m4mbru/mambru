@@ -254,17 +254,12 @@ pub async fn send_message(
         );
     }
 
-    // Build the chat request
-    //
-    // FIXME: streaming is disabled for now — reqwest's bytes_stream() on
-    // Windows returns 0 tokens with Ollama's SSE. Once we figure out the
-    // cause, switch back to stream: true and use the streaming_chat path.
     let request = ChatRequest {
         messages,
         model: None,
         temperature: None,
         max_tokens: None,
-        stream: false,
+        stream: true,
     };
 
     // Acquire provider.chat() — the lock is held during the HTTP request to

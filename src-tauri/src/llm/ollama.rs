@@ -38,10 +38,10 @@ impl OllamaProvider {
         })
     }
 
-    /// The endpoint URL (OpenAI-compatible).
+    /// The endpoint URL — uses Ollama's native `/api/chat` with NDJSON.
     fn url(&self) -> String {
         format!(
-            "{}/v1/chat/completions",
+            "{}/api/chat",
             self.base_url.trim_end_matches('/')
         )
     }
@@ -73,22 +73,6 @@ impl LLMProvider for OllamaProvider {
 impl OllamaProvider {
     /// Non-streaming path: collect the full response and yield it as a single
     /// item stream so callers don't need to branch.
-    /// Log a debug message to the ollama provider log file.
-    fn log_ollama(msg: &str) {
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(r"C:\Users\JAJKA\AppData\Roaming\com.mambru.desktop\mambru-ollama.log")
-        {
-            use std::io::Write;
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let _ = writeln!(f, "[{ts}] {msg}");
-        }
-    }
-
     async fn non_streaming_chat(
         client: Client,
         url: String,
@@ -98,11 +82,11 @@ impl OllamaProvider {
         let status = resp.status();
         let text = resp.text().await?;
 
-        Self::log_ollama(&format!("status={status}, text.len()={}", text.len()));
-        Self::log_ollama(&format!("raw body: {}", &text[..text.len().min(1000)]));
+        log::debug!("non_streaming_chat: status={status}, text.len()={}", text.len());
+        log::debug!("non_streaming_chat: raw body: {}", &text[..text.len().min(1000)]);
 
         let content = extract_content(&text).unwrap_or_default();
-        Self::log_ollama(&format!("extract_content returned: len={}, empty={}", content.len(), content.is_empty()));
+        log::debug!("non_streaming_chat: extracted content: len={}, empty={}", content.len(), content.is_empty());
 
         let stream = async_stream::stream! {
             yield Ok(content);
@@ -110,7 +94,8 @@ impl OllamaProvider {
         Ok(Box::pin(stream))
     }
 
-    /// Streaming path: parse SSE events and yield each content delta.
+    /// Streaming path: parse NDJSON lines from Ollama `/api/chat` and yield
+    /// each content delta.
     async fn streaming_chat(
         client: Client,
         url: String,
@@ -121,6 +106,7 @@ impl OllamaProvider {
         let stream = async_stream::stream! {
             let mut byte_stream = resp.bytes_stream();
             let mut buf = String::new();
+            let mut token_count: u64 = 0;
 
             while let Some(chunk) = byte_stream.next().await {
                 let chunk = match chunk {
@@ -131,72 +117,55 @@ impl OllamaProvider {
                     }
                 };
 
-                // Accumulate bytes and parse SSE lines
+                // Accumulate bytes and parse NDJSON lines
                 let chunk_str = String::from_utf8_lossy(&chunk);
                 buf.push_str(&chunk_str);
 
-                // Process complete SSE events (delimited by double newline)
-                while let Some(pos) = buf.find("\n\n") {
-                    let event = buf[..pos].to_string();
-                    buf = buf[pos + 2..].to_string();
-                    for line in event.lines() {
-                        if let Some(delta) = parse_sse_line(line) {
-                            yield Ok(delta);
+                // Process complete NDJSON lines (delimited by single newline)
+                while let Some(pos) = buf.find('\n') {
+                    let line = buf[..pos].to_string();
+                    buf = buf[pos + 1..].to_string();
+
+                    match parse_ndjson_line(&line) {
+                        Ok(Some(content)) => {
+                            token_count += 1;
+                            log::debug!("ollama token {}: {}", token_count, content);
+                            yield Ok(content);
+                        }
+                        Ok(None) => {
+                            // Skip empty, done:true, or missing-content lines
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!("ollama parse error: {e}");
+                            yield Err(LlmError::Api(format!("NDJSON parse error: {e}")));
+                            return;
                         }
                     }
                 }
             }
 
             // Process any remaining data in the buffer
-            for line in buf.lines() {
-                if let Some(delta) = parse_sse_line(line) {
-                    yield Ok(delta);
+            if !buf.is_empty() {
+                match parse_ndjson_line(&buf) {
+                    Ok(Some(content)) => {
+                        token_count += 1;
+                        log::debug!("ollama token {}: {}", token_count, content);
+                        yield Ok(content);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::debug!("ollama trailing parse error: {e}");
+                        yield Err(LlmError::Api(format!("NDJSON parse error: {e}")));
+                        return;
+                    }
                 }
             }
+
+            log::debug!("ollama stream complete — {token_count} tokens yielded");
         };
 
         Ok(Box::pin(stream))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SSE parsing helpers
-// ---------------------------------------------------------------------------
-
-/// Parse a single SSE line from the OpenAI-compatible format:
-///
-/// ```text
-/// data: {"id":"...","choices":[{"delta":{"content":"Hello"}}]}
-/// ```
-///
-/// Returns `Some(content)` if the line contains a content delta, `None` for
-/// no-content deltas, `[DONE]` signals, or other non-content events.
-fn parse_sse_line(line: &str) -> Option<String> {
-    let line = line.trim();
-
-    // Ignore non-data lines or the termination signal
-    if !line.starts_with("data: ") || line == "data: [DONE]" {
-        return None;
-    }
-
-    // Strip the "data: " prefix and parse JSON
-    let json_str = &line[6..];
-    let value: Value = serde_json::from_str(json_str).ok()?;
-
-    // Navigate to choices[0].delta.content
-    let content = value
-        .get("choices")?
-        .as_array()?
-        .first()?
-        .get("delta")?
-        .get("content")?
-        .as_str()?
-        .to_string();
-
-    if content.is_empty() {
-        None
-    } else {
-        Some(content)
     }
 }
 
@@ -237,30 +206,92 @@ fn extract_content(body: &str) -> Option<String> {
 // Tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// NDJSON parsing for Ollama /api/chat
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error("invalid NDJSON line: {0}")]
+    InvalidJson(#[from] serde_json::Error),
+}
+
+impl PartialEq for ParseError {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (ParseError::InvalidJson(_), ParseError::InvalidJson(_))
+        )
+    }
+}
+
+/// Parse a single NDJSON line from Ollama `/api/chat`.
+///
+/// # Returns
+/// - `Ok(Some(content))` — line with non-empty `message.content`
+/// - `Ok(None)` — empty line, `done:true` line, or missing content
+/// - `Err(ParseError)` — malformed JSON
+fn parse_ndjson_line(line: &str) -> Result<Option<String>, ParseError> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let value: Value = serde_json::from_str(trimmed)?;
+    match value
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+    {
+        Some(c) if !c.is_empty() => Ok(Some(c.to_string())),
+        _ => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // ── NDJSON parser tests ──
+
     #[test]
-    fn test_parse_sse_line_with_content() {
-        let line = r#"data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#;
-        assert_eq!(parse_sse_line(line), Some("Hello".into()));
+    fn test_parse_ndjson_normal_content() {
+        let line = r#"{"model":"llama3.2","message":{"role":"assistant","content":"Hello"},"done":false}"#;
+        assert_eq!(parse_ndjson_line(line), Ok(Some("Hello".into())));
     }
 
     #[test]
-    fn test_parse_sse_line_no_content() {
-        let line = r#"data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#;
-        assert_eq!(parse_sse_line(line), None);
+    fn test_parse_ndjson_empty_line() {
+        assert_eq!(parse_ndjson_line(""), Ok(None));
+        assert_eq!(parse_ndjson_line("\n"), Ok(None));
     }
 
     #[test]
-    fn test_parse_sse_line_done_signal() {
-        assert_eq!(parse_sse_line("data: [DONE]"), None);
+    fn test_parse_ndjson_done_true_line() {
+        // The final line has done:true and empty content — should return None
+        let line = r#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#;
+        assert_eq!(parse_ndjson_line(line), Ok(None));
     }
 
     #[test]
-    fn test_parse_sse_line_non_data_line() {
-        assert_eq!(parse_sse_line(": heartbeat"), None);
+    fn test_parse_ndjson_malformed_json() {
+        let result = parse_ndjson_line("not valid json");
+        assert!(result.is_err());
+        match result {
+            Err(ParseError::InvalidJson(_)) => {} // expected
+            _ => panic!("expected InvalidJson error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ndjson_missing_content() {
+        let line = r#"{"done":true}"#;
+        assert_eq!(parse_ndjson_line(line), Ok(None));
+    }
+
+    #[test]
+    fn test_parse_ndjson_trailing_whitespace() {
+        let line = "  {\"message\":{\"content\":\"Hi\"}}  ";
+        assert_eq!(parse_ndjson_line(line), Ok(Some("Hi".into())));
     }
 
     #[test]

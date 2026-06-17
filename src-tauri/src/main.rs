@@ -144,6 +144,9 @@ fn _assert_appstate_is_send() {
 }
 
 fn main() {
+    // Initialise logging (controlled by RUST_LOG env var)
+    env_logger::init();
+
     // Load persisted settings or fall back to defaults
     let initial_settings = config::settings::Settings::load().unwrap_or_default();
 
