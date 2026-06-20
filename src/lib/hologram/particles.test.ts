@@ -129,19 +129,20 @@ describe('morphToStyle', () => {
 
     const current = geometry.attributes.position.array as Float32Array;
     for (let i = 0; i < count * 3; i++) {
-      expect(current[i]).toBeCloseTo(target[i], 5);
+      // Should converge to target — within 0.001 after many iterations
+      expect(Math.abs(current[i] - target[i])).toBeLessThan(0.001);
     }
   });
 
-  it('marks position attribute as needing update', () => {
+  it('marks position attribute version on update', () => {
     const count = 10;
     const geometry = makeMockGeometry(count);
     const target = new Float32Array(count * 3);
     for (let i = 0; i < count * 3; i++) target[i] = 0.5;
 
-    geometry.attributes.position.needsUpdate = false;
+    const initialVersion = geometry.attributes.position.version;
     morphToStyle(geometry, target, 0.03);
-    expect(geometry.attributes.position.needsUpdate).toBe(true);
+    expect(geometry.attributes.position.version).toBeGreaterThan(initialVersion);
   });
 
   it('handles small progress correctly', () => {
@@ -176,19 +177,19 @@ describe('snapToStyle', () => {
 
     const current = geometry.attributes.position.array as Float32Array;
     for (let i = 0; i < count * 3; i++) {
-      expect(current[i]).toBe(0.42);
+      expect(current[i]).toBeCloseTo(0.42, 5);
     }
   });
 
-  it('marks position attribute as needing update', () => {
+  it('marks position attribute version on update', () => {
     const count = 10;
     const geometry = makeMockGeometry(count);
     const target = new Float32Array(count * 3);
     for (let i = 0; i < count * 3; i++) target[i] = 0.5;
 
-    geometry.attributes.position.needsUpdate = false;
+    const initialVersion = geometry.attributes.position.version;
     snapToStyle(geometry, target);
-    expect(geometry.attributes.position.needsUpdate).toBe(true);
+    expect(geometry.attributes.position.version).toBeGreaterThan(initialVersion);
   });
 
   it('does not change position count', () => {

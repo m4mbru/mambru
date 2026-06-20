@@ -1,9 +1,9 @@
 /**
  * HologramEngine tests.
  *
- * Three.js is lazy-loaded via dynamic `import('three')`. In tests we mock
- * the module to avoid pulling in the full ~600KB library. We verify the
- * engine's lifecycle: constructor, init, destroy, resize, and API methods.
+ * Three.js is lazy-loaded via dynamic `import('three')`. We mock the 'three'
+ * module at the module level so the dynamic import returns Three.js classes
+ * without loading the full ~600KB library.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -19,26 +19,31 @@ import {
   Color,
 } from 'three';
 
-// Mock the dynamic import of 'three'
-const mockThree = {
-  Scene,
-  PerspectiveCamera,
-  WebGLRenderer,
-  Points,
-  PointsMaterial,
-  BufferGeometry,
-  BufferAttribute,
-  AdditiveBlending,
-  Color,
-};
-
+// ─── Mock 'three' module (catches dynamic import) ────────────────
+vi.mock('three', async (importOriginal) => {
+  // Keep real Three.js classes but replace WebGLRenderer with a mock
+  // so it doesn't need a real WebGL context (unavailable in jsdom).
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    WebGLRenderer: vi.fn().mockImplementation(() => ({
+      domElement: document.createElement('canvas'),
+      setSize: vi.fn(),
+      render: vi.fn(),
+      setPixelRatio: vi.fn(),
+      dispose: vi.fn(),
+      getContext: vi.fn(),
+    })),
+  };
+});
 vi.mock('./particles', () => ({
   createParticleData: vi.fn(() => {
     const geometry = new BufferGeometry();
     const pos = new Float32Array(30);
+    for (let i = 0; i < 30; i++) pos[i] = Math.random() * 2 - 1;
     geometry.setAttribute('position', new BufferAttribute(pos, 3));
     const colors = new Float32Array(30);
-    for (let i = 0; i < 30; i++) colors[i] = 0.5;
+    for (let i = 0; i < 30; i++) colors[i] = 0.5 + 0.2 * Math.random();
     geometry.setAttribute('color', new BufferAttribute(colors, 3));
     const sizes = new Float32Array(10);
     for (let i = 0; i < 10; i++) sizes[i] = 1.0;
@@ -103,7 +108,7 @@ vi.mock('./audioReactivity', () => ({
   })),
 }));
 
-// Mock requestAnimationFrame and cancelAnimationFrame
+// Mock rAF/cAF for a controlled test environment
 globalThis.requestAnimationFrame = vi.fn((cb) => {
   return setTimeout(() => cb(performance.now()), 16) as unknown as number;
 });
@@ -122,8 +127,8 @@ describe('HologramEngine', () => {
     canvas = document.createElement('canvas');
     canvas.width = 200;
     canvas.height = 200;
-    canvas.style.width = '200px';
-    canvas.style.height = '200px';
+    Object.defineProperty(canvas, 'clientWidth', { value: 200, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 200, configurable: true });
   });
 
   afterEach(() => {
@@ -147,44 +152,44 @@ describe('HologramEngine', () => {
       expect(engine).toBeInstanceOf(HologramEngine);
     });
 
-    it('uses default options when none provided', () => {
+    it('uses defaults when no options provided', () => {
       engine = new HologramEngine(canvas);
       expect(engine).toBeInstanceOf(HologramEngine);
     });
   });
 
   describe('init / destroy lifecycle', () => {
-    it('initializes and sets up Three.js scene', async () => {
+    it('initializes and creates Three.js scene', async () => {
       engine = new HologramEngine(canvas);
-      // Mock the dynamic import
-      vi.spyOn(engine as any, 'Three', 'get').mockReturnValue(mockThree);
-
       await engine.init();
 
-      // After init, the internal state should be set
+      // The private Three field gets set by the dynamic import
       expect((engine as any).running).toBe(true);
       expect((engine as any).scene).toBeDefined();
-      expect((engine as any).camera).toBeDefined();
-      expect((engine as any).renderer).toBeDefined();
+      expect((engine as any).scene).toBeInstanceOf(Scene);
+      expect((engine as any).camera).toBeInstanceOf(PerspectiveCamera);
+      // WebGLRenderer is mocked — verify shape instead of instanceof
+      expect((engine as any).renderer).toHaveProperty('setSize');
+      expect((engine as any).renderer).toHaveProperty('render');
+      expect((engine as any).renderer).toHaveProperty('dispose');
+      expect((engine as any).particles).toBeInstanceOf(Points);
+      expect((engine as any).material).toBeInstanceOf(PointsMaterial);
     });
 
-    it('is idempotent — calling init twice does not reinitialize', async () => {
+    it('is idempotent — calling init twice does not re-initialize', async () => {
       engine = new HologramEngine(canvas);
-      vi.spyOn(engine as any, 'Three', 'get').mockReturnValue(mockThree);
-
       await engine.init();
       const scene1 = (engine as any).scene;
+
       await engine.init(); // second call
       const scene2 = (engine as any).scene;
 
-      // Scene should be the same object (no re-init)
+      // Scene should be the same object
       expect(scene1).toBe(scene2);
     });
 
-    it('destroy stops the render loop and releases references', async () => {
+    it('destroy stops render loop and releases references', async () => {
       engine = new HologramEngine(canvas);
-      vi.spyOn(engine as any, 'Three', 'get').mockReturnValue(mockThree);
-
       await engine.init();
       engine.destroy();
 
@@ -203,14 +208,24 @@ describe('HologramEngine', () => {
       expect(() => engine!.destroy()).not.toThrow();
     });
 
-    it('three is loaded via dynamic import', async () => {
+    it('loads three via dynamic import', async () => {
       engine = new HologramEngine(canvas);
-      const importSpy = vi.spyOn(engine as any, 'Three', 'get').mockReturnValue(null);
-
       await engine.init();
-
-      // The dynamic import should have been triggered
       expect((engine as any).Three).toBeDefined();
+      // Should contain Scene from the three module
+      expect((engine as any).Three.Scene).toBe(Scene);
+    });
+
+    it('adds resize listener on init and removes on destroy', async () => {
+      const addSpy = vi.spyOn(window, 'addEventListener');
+      const removeSpy = vi.spyOn(window, 'removeEventListener');
+
+      engine = new HologramEngine(canvas);
+      await engine.init();
+      expect(addSpy).toHaveBeenCalledWith('resize', expect.any(Function));
+
+      engine.destroy();
+      expect(removeSpy).toHaveBeenCalledWith('resize', expect.any(Function));
     });
   });
 
@@ -229,6 +244,24 @@ describe('HologramEngine', () => {
 
       engine.setStyle('nonexistent' as any);
       expect((engine as any).currentStyle).toBe('woman1');
+    });
+
+    it('setStyle ignores same style (no-op)', () => {
+      engine = new HologramEngine(canvas);
+      (engine as any).currentStyle = 'sphere';
+
+      engine.setStyle('sphere');
+      expect((engine as any).currentStyle).toBe('sphere');
+    });
+
+    it('snapStyle calls snapToStyle when style exists', async () => {
+      const { snapToStyle } = await import('./particles');
+      engine = new HologramEngine(canvas);
+      (engine as any).particles = new Points(new BufferGeometry(), new PointsMaterial());
+
+      engine.snapStyle('sphere');
+
+      expect(snapToStyle).toHaveBeenCalled();
     });
   });
 
@@ -257,30 +290,30 @@ describe('HologramEngine', () => {
 
       expect(engine.getEmotion()).toBe('thinking');
     });
+
+    it('getEmotion defaults to neutral', () => {
+      engine = new HologramEngine(canvas);
+      expect(engine.getEmotion()).toBe('neutral');
+    });
   });
 
   describe('resize', () => {
     it('resize event triggers renderer and camera update', async () => {
       engine = new HologramEngine(canvas);
-      vi.spyOn(engine as any, 'Three', 'get').mockReturnValue(mockThree);
-
       await engine.init();
 
       const renderer = (engine as any).renderer;
       const setSizeSpy = vi.spyOn(renderer, 'setSize');
 
       // Trigger resize
-      canvas.style.width = '300px';
-      canvas.style.height = '150px';
       Object.defineProperty(canvas, 'clientWidth', { value: 300 });
       Object.defineProperty(canvas, 'clientHeight', { value: 150 });
-
       window.dispatchEvent(new Event('resize'));
 
       expect(setSizeSpy).toHaveBeenCalledWith(300, 150, false);
     });
 
-    it('resize without renderer is a no-op', () => {
+    it('resize without initialized engine is a no-op', () => {
       engine = new HologramEngine(canvas);
       expect(() => window.dispatchEvent(new Event('resize'))).not.toThrow();
     });
