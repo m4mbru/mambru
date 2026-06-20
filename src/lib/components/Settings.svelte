@@ -9,8 +9,18 @@
     AppearanceConfig,
     PersonalityConfig,
     SearchConfig,
+    HologramConfig,
   } from '../stores/settings';
   import { voice } from '../stores/voice';
+  import {
+    hologram,
+    setHologramEnabled,
+    setHologramStyle,
+    setHologramSize,
+    setHologramPosition,
+    type HologramStyle,
+    type HologramPosition,
+  } from '../stores/hologram';
   import { getCommands, saveCommand, deleteCommand, buildCommand } from '../api/tools';
   import type { Command, CommandAction } from '../api/tools';
 
@@ -21,7 +31,7 @@
 
   // ── Tab state ───────────────────────────────────────────────────────────
 
-  type TabId = 'provider' | 'voice' | 'commands' | 'personality' | 'appearance';
+  type TabId = 'provider' | 'voice' | 'commands' | 'personality' | 'appearance' | 'avatar';
   let activeTab: TabId = 'provider';
 
   const tabs: Array<{ id: TabId; label: string; icon: string }> = [
@@ -30,6 +40,7 @@
     { id: 'commands', label: 'Commands', icon: 'terminal' },
     { id: 'personality', label: 'Personality', icon: 'smile' },
     { id: 'appearance', label: 'Appearance', icon: 'eye' },
+    { id: 'avatar', label: 'Avatar', icon: 'user' },
   ];
 
   // ── Local form state ───────────────────────────────────────────────────
@@ -301,6 +312,8 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             {:else if tab.icon === 'smile'}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            {:else if tab.icon === 'user'}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             {:else}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             {/if}
@@ -772,6 +785,93 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
               <p class="hint">Controls UI language. Chat language adapts to your messages.</p>
             </div>
           </div>
+
+        <!-- Tab 6: Avatar -->
+        {:else if activeTab === 'avatar'}
+          <div class="tab-section">
+            <h3>Hologram Avatar</h3>
+            <p class="section-desc">Configure the 3D particle avatar that reacts to your voice and emotions.</p>
+
+            <!-- Enable/disable toggle -->
+            <div class="field">
+              <label class="toggle-row">
+                <span>Enable Avatar</span>
+                <label class="toggle" role="switch" aria-checked={localSettings.hologram.enabled} tabindex="0">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.hologram.enabled}
+                    on:change={() => {
+                      localSettings.hologram.enabled = !localSettings.hologram.enabled;
+                      setHologramEnabled(localSettings.hologram.enabled);
+                      handleSave();
+                    }}
+                    class="toggle-input"
+                  />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </label>
+            </div>
+
+            <!-- Style selector -->
+            <div class="field">
+              <label for="holo-style">Style</label>
+              <select
+                id="holo-style"
+                bind:value={localSettings.hologram.style}
+                on:change={() => {
+                  setHologramStyle(localSettings.hologram.style as HologramStyle);
+                  handleSave();
+                }}
+              >
+                <option value="woman1">Woman 1</option>
+                <option value="woman2">Woman 2</option>
+                <option value="man1">Man 1</option>
+                <option value="man2">Man 2</option>
+                <option value="sphere">Sphere</option>
+              </select>
+            </div>
+
+            <!-- Size slider -->
+            <div class="field">
+              <label for="holo-size">Size: {localSettings.hologram.size}px</label>
+              <input
+                id="holo-size"
+                type="range"
+                min="100"
+                max="400"
+                step="10"
+                bind:value={localSettings.hologram.size}
+                on:input={() => {
+                  setHologramSize(localSettings.hologram.size);
+                }}
+                on:change={handleSave}
+                class="range-input"
+              />
+              <div class="range-labels">
+                <span>100px</span>
+                <span>400px</span>
+              </div>
+            </div>
+
+            <!-- Position selector -->
+            <div class="field">
+              <label for="holo-position">Position</label>
+              <select
+                id="holo-position"
+                bind:value={localSettings.hologram.position}
+                on:change={() => {
+                  setHologramPosition(localSettings.hologram.position as HologramPosition);
+                  handleSave();
+                }}
+              >
+                <option value="floating">Floating</option>
+                <option value="minimal">Minimal</option>
+                <option value="panel">Panel</option>
+              </select>
+            </div>
+          </div>
         {/if}
       {/if}
     </div>
@@ -1099,6 +1199,14 @@ Maintain a formal but approachable tone. Prioritize accuracy and clarity over pe
     background: var(--color-primary);
     cursor: pointer;
     border: 2px solid var(--color-surface);
+  }
+
+  .range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    margin-top: var(--space-xs);
   }
 
   /* ── Connection test ──────────────────────────── */
