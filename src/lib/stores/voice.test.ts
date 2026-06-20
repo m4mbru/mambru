@@ -11,6 +11,8 @@ import {
   setTranscription,
   setError,
   updateAvailability,
+  setContinuousMode,
+  setEmotion,
 } from './voice';
 
 describe('voice store', () => {
@@ -28,6 +30,9 @@ describe('voice store', () => {
     expect(state.ttsAvailable).toBe(false);
     expect(state.lastTranscription).toBe('');
     expect(state.error).toBe('');
+    expect(state.continuousMode).toBe(true);
+    expect(state.audioLevel).toBe(0);
+    expect(state.emotion).toBe('neutral');
   });
 
   it('sets recording state', () => {
@@ -131,5 +136,33 @@ describe('voice store', () => {
     expect(state.isRecording).toBe(true);
     expect(state.isSpeaking).toBe(true);
     expect(state.pttKey).toBe('V'); // unchanged default
+  });
+
+  it('sets continuous mode', () => {
+    setContinuousMode(false);
+    expect(get(voice).continuousMode).toBe(false);
+
+    setContinuousMode(true);
+    expect(get(voice).continuousMode).toBe(true);
+  });
+
+  it('sets emotion state', () => {
+    setEmotion('happy');
+    expect(get(voice).emotion).toBe('happy');
+
+    setEmotion('sad');
+    expect(get(voice).emotion).toBe('sad');
+  });
+
+  it('resetVoice clears emotion and continuousMode', () => {
+    setEmotion('happy');
+    setContinuousMode(false);
+
+    resetVoice();
+
+    const state = get(voice);
+    expect(state.emotion).toBe('neutral');
+    expect(state.continuousMode).toBe(true);
+    expect(state.audioLevel).toBe(0);
   });
 });
