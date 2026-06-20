@@ -17,6 +17,7 @@
   import MessageBubble from './MessageBubble.svelte';
   import VoiceControls from './VoiceControls.svelte';
   import ConfirmationDialog from './ConfirmationDialog.svelte';
+  import HologramWidget from './HologramWidget.svelte';
 
   // ── State ───────────────────────────────────────────────────────────────
 
@@ -220,6 +221,9 @@
   }
 </script>
 
+<!-- Hologram avatar overlay (fixed position, outside layout) -->
+<HologramWidget />
+
 <div class="chat-container">
   <!-- Loading state -->
   {#if loading}
@@ -313,6 +317,20 @@
         autofocus
         aria-label="Message input"
       ></textarea>
+
+      <!-- Image upload button -->
+      <button
+        class="img-btn"
+        disabled={streaming}
+        title="Attach image"
+        aria-label="Attach image"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <polyline points="21 15 16 10 5 21" />
+        </svg>
+      </button>
 
       {#if streaming}
         <button class="send-btn stop-btn" on:click={handleStop} title="Stop streaming" aria-label="Stop">
@@ -588,5 +606,32 @@
 
   .send-btn.stop-btn:hover {
     background: #e05555;
+  }
+
+  /* ── Image button ──────────────────────────────── */
+
+  .img-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    background: transparent;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+  }
+
+  .img-btn:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-text-secondary);
+  }
+
+  .img-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 </style>
