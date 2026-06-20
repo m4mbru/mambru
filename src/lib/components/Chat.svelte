@@ -2,6 +2,7 @@
   import { onMount, onDestroy, afterUpdate } from 'svelte';
   import { conversation } from '../stores/conversation';
   import { settings } from '../stores/settings';
+  import { voice } from '../stores/voice';
   import {
     sendMessage,
     listenForTokens,
@@ -9,6 +10,7 @@
     listenForError,
     getHistory,
   } from '../api/llm';
+  import { startContinuousCapture } from '../api/voice';
   import { invoke } from '@tauri-apps/api/core';
 
   const flog = (msg: string) => invoke('log_debug', { msg }).catch(() => {});
@@ -182,6 +184,13 @@
     } catch (_) {
       // Backend may not be ready — continue with local state
       loading = false;
+    }
+
+    // Auto-start continuous capture if voice models are available
+    if ($voice.continuousMode) {
+      startContinuousCapture().catch(() => {
+        // Backend may not be ready yet — voice controls will retry
+      });
     }
 
     // Listen for auto-executed command results (Safe commands)
