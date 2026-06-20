@@ -71,3 +71,10 @@ export function setHologramDancing(dancing: boolean): void {
 export function setEngineReady(ready: boolean): void {
   hologram.update((s) => ({ ...s, engineReady: ready }));
 }
+
+/**
+ * Reset the hologram store to its default state.
+ */
+export function resetHologram(): void {
+  hologram.set(initialState);
+}
