@@ -164,7 +164,18 @@ export interface EmotionPayload {
 export type EmotionCallback = (payload: EmotionPayload) => void;
 
 /**
- * Listen for hologram emotion events from the backend.
+ * Listen for voice emotion events from the backend (e.g. voice tone analysis).
+ */
+export function listenForVoiceEmotion(
+  callback: EmotionCallback,
+): Promise<UnlistenFn> {
+  return listen<EmotionPayload>('voice:emotion', (event) => {
+    callback(event.payload);
+  });
+}
+
+/**
+ * Listen for hologram emotion events from the backend (LLM-extracted).
  */
 export function listenForHoloEmotion(
   callback: EmotionCallback,

@@ -21,6 +21,10 @@ export interface VoiceState {
   error: string;
   /** Whether continuous capture mode is active. */
   continuousMode: boolean;
+  /** Current microphone audio level (0–1), used for reactivity. */
+  audioLevel: number;
+  /** Current emotion detected from voice or LLM context. */
+  emotion: string;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────
@@ -35,6 +39,8 @@ const initialState: VoiceState = {
   lastTranscription: '',
   error: '',
   continuousMode: true,
+  audioLevel: 0,
+  emotion: 'neutral',
 };
 
 /**
@@ -120,4 +126,11 @@ export function updateAvailability(
  */
 export function setContinuousMode(enabled: boolean): void {
   voice.update((s) => ({ ...s, continuousMode: enabled }));
+}
+
+/**
+ * Set the current voice / emotion state.
+ */
+export function setEmotion(emotion: string): void {
+  voice.update((s) => ({ ...s, emotion }));
 }
