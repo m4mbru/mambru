@@ -56,6 +56,8 @@ export interface HologramEngineOptions {
   enableAudioReactivity?: boolean;
   /** Morph transition speed (0–1, default: 0.03). */
   morphSpeed?: number;
+  /** Enable auto quality adjustment when FPS drops (default: true). */
+  autoQuality?: boolean;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ const DEFAULT_OPTIONS: HologramEngineOptions = {
   enableDance: true,
   enableAudioReactivity: true,
   morphSpeed: 0.03,
+  autoQuality: true,
 };
 
 // ─── Engine ──────────────────────────────────────────────────────────
@@ -90,6 +93,16 @@ export class HologramEngine {
   private animFrameId: number | null = null;
   private startTime = 0;
   private running = false;
+
+  // FPS tracking and auto-quality
+  private lastFrameTime = 0;
+  private fpsTimestamps: number[] = [];
+  private lowFpsDuration = 0;
+  private qualityLevel = 1; // 1 = full, lower = reduced
+  private readonly FPS_HISTORY_LENGTH = 30;
+  private readonly LOW_FPS_THRESHOLD = 30;
+  private readonly LOW_FPS_DURATION_THRESHOLD = 2;
+  private readonly QUALITY_REDUCTION_FACTOR = 0.75;
 
   // Sub-controllers
   private dance: DanceController;
@@ -152,6 +165,7 @@ export class HologramEngine {
     // Start loop
     this.running = true;
     this.startTime = performance.now();
+    this.lastFrameTime = performance.now();
     this.loop(performance.now());
 
     // Handle resize
@@ -224,7 +238,10 @@ export class HologramEngine {
 
     this.animFrameId = requestAnimationFrame(this.loop);
 
-    const delta = 0.016; // ~60fps per frame
+    // Real delta from rAF timestamps (capped at 100ms to avoid spiral on tab switch)
+    const delta = Math.min((now - this.lastFrameTime) / 1000, 0.1);
+    this.lastFrameTime = now;
+
     const elapsed = (now - this.startTime) / 1000;
 
     const T = this.Three;
@@ -266,7 +283,12 @@ export class HologramEngine {
       }
     }
 
-    // 5. Slow ambient rotation
+    // 5. Auto quality adjustment (after dance/emotion, before render)
+    if (this.options.autoQuality && this.particles) {
+      this.updateAutoQuality(delta, now);
+    }
+
+    // 6. Slow ambient rotation
     if (this.particles) {
       this.particles.rotation.y += delta * 0.15;
       // Gentle floating
@@ -301,6 +323,71 @@ export class HologramEngine {
     if (this.material) {
       const baseSize = 0.025 * this.audioParams.sizeMul;
       this.material.size = baseSize * (1 + dance.bounce * 1.2);
+    }
+  }
+
+  // ─── Public accessors ────────────────────────────────────────────
+
+  /** Get the current quality level (1 = full, 0.75 = reduced). */
+  getQualityLevel(): number {
+    return this.qualityLevel;
+  }
+
+  // ─── Auto quality ────────────────────────────────────────────────
+
+  /** Update FPS tracking and adjust quality if needed. */
+  private updateAutoQuality(delta: number, now: number): void {
+    // Track FPS history
+    this.fpsTimestamps.push(now);
+    while (this.fpsTimestamps.length > this.FPS_HISTORY_LENGTH) {
+      this.fpsTimestamps.shift();
+    }
+
+    const avgFps = this.getAverageFps();
+
+    if (avgFps < this.LOW_FPS_THRESHOLD && avgFps > 0) {
+      this.lowFpsDuration += delta;
+    } else {
+      // Recover twice as fast as we degrade
+      this.lowFpsDuration = Math.max(0, this.lowFpsDuration - delta * 2);
+    }
+
+    if (this.lowFpsDuration >= this.LOW_FPS_DURATION_THRESHOLD) {
+      this.setQualityLevel(this.QUALITY_REDUCTION_FACTOR);
+    } else if (
+      this.lowFpsDuration < this.LOW_FPS_DURATION_THRESHOLD * 0.5 &&
+      this.qualityLevel < 1
+    ) {
+      this.setQualityLevel(1);
+    }
+  }
+
+  /** Compute average FPS over the tracked history window. */
+  private getAverageFps(): number {
+    if (this.fpsTimestamps.length < 2) return 60;
+    const windowMs =
+      this.fpsTimestamps[this.fpsTimestamps.length - 1] - this.fpsTimestamps[0];
+    const avgDelta = windowMs / (this.fpsTimestamps.length - 1) / 1000;
+    return avgDelta > 0 ? 1 / avgDelta : 60;
+  }
+
+  /** Apply a quality level: adjust draw range and disable glow when reduced. */
+  private setQualityLevel(level: number): void {
+    if (level === this.qualityLevel) return;
+    this.qualityLevel = level;
+
+    if (this.particles?.geometry) {
+      const posAttr = this.particles.geometry.attributes.position;
+      if (posAttr) {
+        const totalParticles = posAttr.count;
+        const drawCount = Math.floor(totalParticles * level);
+        this.particles.geometry.setDrawRange(0, drawCount);
+      }
+    }
+
+    // When quality is reduced, disable glow/bloom effects
+    if (level < 1) {
+      this.audioParams.glow = 0;
     }
   }
 
