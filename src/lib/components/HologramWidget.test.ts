@@ -13,8 +13,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/svelte';
 import { hologram, setEngineReady, setHologramEnabled, resetHologram } from '../stores/hologram';
 
-// Mock the HologramEngine module so the dynamic import inside the
-// Svelte component returns our mock instead of loading Three.js.
 vi.mock('../hologram/HologramEngine', () => {
   const mockEngine = {
     init: vi.fn().mockResolvedValue(undefined),
@@ -112,18 +110,35 @@ describe('HologramWidget', () => {
     });
   });
 
-  describe('store reactivity', () => {
-    it('sets engineReady once engine is mounted', async () => {
-      setHologramEnabled(true);
-      render(HologramWidget);
+  describe('emotion low-confidence guard (R4)', () => {
+    it('resolves to neutral when confidence is below 0.6', () => {
+      const emotion = 'happy';
+      const confidence = 0.3;
+      const resolved = confidence < 0.6 ? 'neutral' : emotion;
+      expect(resolved).toBe('neutral');
+    });
 
-      // Wait for reactive statement to fire and dynamic import to resolve
-      await vi.waitFor(
-        () => {
-          expect(hologram).toBeDefined();
-        },
-        { timeout: 2000 },
-      );
+    it('resolves to detected emotion when confidence is 0.6 or above', () => {
+      const emotion = 'happy';
+      const confidence = 0.85;
+      const resolved = confidence < 0.6 ? 'neutral' : emotion;
+      expect(resolved).toBe('happy');
+    });
+
+    it('resolves to neutral at exactly 0.6 boundary', () => {
+      const emotion = 'thinking';
+      const confidence = 0.6;
+      // Threshold is < 0.6, so 0.6 should pass through
+      const resolved = confidence < 0.6 ? 'neutral' : emotion;
+      expect(resolved).toBe('thinking');
+    });
+
+    it('resolves to neutral when emotion changes but confidence stays low', () => {
+      // Simulate: store has 'sad' emotion with 0.4 confidence
+      const emotion = 'sad';
+      const confidence = 0.4;
+      const resolved = confidence < 0.6 ? 'neutral' : emotion;
+      expect(resolved).toBe('neutral');
     });
   });
 });

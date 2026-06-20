@@ -12,6 +12,7 @@
   let size = 200;
   let position: HologramPosition = 'floating';
   let emotion: HologramEmotion = 'neutral';
+  let emotionConfidence = 1.0;
 
   const unsubHologram = hologram.subscribe((s) => {
     enabled = s.enabled;
@@ -19,6 +20,7 @@
     size = s.size;
     position = s.position;
     emotion = s.emotion;
+    emotionConfidence = s.emotionConfidence;
   });
 
   // ── Engine state ──────────────────────────────────────────────────────
@@ -44,8 +46,8 @@
       // Apply current style
       engine.setStyle(style as ParticleStyle);
 
-      // Apply current emotion
-      engine.setEmotion(emotion as Emotion);
+      // Apply current emotion (with low-confidence guard)
+      engine.setEmotion(emotionConfidence < 0.6 ? 'neutral' : (emotion as Emotion));
     } catch (err) {
       console.error('[HologramWidget] Failed to mount engine:', err);
       setEngineReady(false);
@@ -74,7 +76,9 @@
   }
 
   $: if (engine && emotion) {
-    engine.setEmotion(emotion as Emotion);
+    // R4: Low-confidence guard — remain neutral when confidence < 0.6
+    const resolvedEmotion = emotionConfidence < 0.6 ? 'neutral' : emotion;
+    engine.setEmotion(resolvedEmotion as Emotion);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────
