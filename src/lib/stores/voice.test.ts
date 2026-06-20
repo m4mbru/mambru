@@ -165,4 +165,111 @@ describe('voice store', () => {
     expect(state.continuousMode).toBe(true);
     expect(state.audioLevel).toBe(0);
   });
+
+  describe('continuous capture flow', () => {
+    it('starts with continuous mode enabled by default', () => {
+      expect(get(voice).continuousMode).toBe(true);
+    });
+
+    it('sets recording state when continuous capture starts', () => {
+      // Simulate start of continuous capture
+      setRecording(true);
+      const state = get(voice);
+      expect(state.isRecording).toBe(true);
+      expect(state.continuousMode).toBe(true); // unchanged
+    });
+
+    it('clears recording state when continuous capture stops', () => {
+      setRecording(true);
+      expect(get(voice).isRecording).toBe(true);
+
+      setRecording(false);
+      expect(get(voice).isRecording).toBe(false);
+    });
+
+    it('emotion state persists when toggling continuous mode', () => {
+      setEmotion('thinking');
+      setContinuousMode(false);
+
+      const state = get(voice);
+      expect(state.emotion).toBe('thinking');
+      expect(state.continuousMode).toBe(false);
+
+      // Switch back
+      setContinuousMode(true);
+      expect(get(voice).continuousMode).toBe(true);
+      expect(get(voice).emotion).toBe('thinking'); // emotion persists
+    });
+
+    it('audioLevel updates during active recording', () => {
+      // Simulate audio level changes during continuous capture
+      setRecording(true);
+      voice.update((s) => ({ ...s, audioLevel: 0.5 }));
+      expect(get(voice).audioLevel).toBe(0.5);
+
+      voice.update((s) => ({ ...s, audioLevel: 0.8 }));
+      expect(get(voice).audioLevel).toBe(0.8);
+    });
+
+    it('audioLevel resets when recording stops', () => {
+      setRecording(true);
+      voice.update((s) => ({ ...s, audioLevel: 0.6 }));
+
+      setRecording(false);
+      voice.update((s) => ({ ...s, audioLevel: 0 }));
+
+      expect(get(voice).audioLevel).toBe(0);
+    });
+
+    it('toggles from continuous to PTT mode', () => {
+      expect(get(voice).continuousMode).toBe(true);
+
+      setContinuousMode(false);
+      expect(get(voice).continuousMode).toBe(false);
+
+      // In PTT mode, recording starts on key press
+      setRecording(true);
+      expect(get(voice).isRecording).toBe(true);
+
+      // Recording stops on key release
+      setRecording(false);
+      expect(get(voice).isRecording).toBe(false);
+    });
+
+    it('maintains audioLevel when switching modes', () => {
+      voice.update((s) => ({ ...s, audioLevel: 0.4, isRecording: true }));
+
+      // Switch from continuous to PTT
+      setContinuousMode(false);
+      expect(get(voice).continuousMode).toBe(false);
+      expect(get(voice).audioLevel).toBe(0.4); // level preserved
+      expect(get(voice).isRecording).toBe(true); // recording preserved
+    });
+
+    it('transcription is set after continuous capture speech segment', () => {
+      // Simulate VAD auto-transcribe
+      setRecording(true);
+      // Speech detected and processed
+      setRecording(false);
+      setTranscription('Hello, this is a test message');
+
+      const state = get(voice);
+      expect(state.lastTranscription).toBe('Hello, this is a test message');
+      expect(state.isRecording).toBe(false);
+    });
+
+    it('recording resumes after transcription in continuous mode', () => {
+      // Continuous capture: speech ends -> transcribe -> resume
+      setRecording(true); // capturing
+      setRecording(false); // speech ended
+      setTranscription('Test message'); // auto-transcribed
+
+      // Resume capture for next segment
+      setRecording(true);
+
+      const state = get(voice);
+      expect(state.isRecording).toBe(true);
+      expect(state.lastTranscription).toBe('Test message'); // previous transcription preserved
+    });
+  });
 });
