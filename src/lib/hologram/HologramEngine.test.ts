@@ -297,6 +297,110 @@ describe('HologramEngine', () => {
     });
   });
 
+  describe('auto quality adjustment', () => {
+    it('starts with full quality level by default', async () => {
+      engine = new HologramEngine(canvas);
+      await engine.init();
+      expect(engine.getQualityLevel()).toBe(1);
+    });
+
+    it('starts with full quality when autoQuality is enabled', async () => {
+      engine = new HologramEngine(canvas, { autoQuality: true });
+      await engine.init();
+      expect(engine.getQualityLevel()).toBe(1);
+    });
+
+    it('reduces quality when FPS stays below 30 for 2+ seconds', async () => {
+      engine = new HologramEngine(canvas, { autoQuality: true });
+      await engine.init();
+
+      const geometry = (engine as any).particles.geometry;
+      const setDrawRangeSpy = vi.spyOn(geometry, 'setDrawRange');
+
+      // Reset lastFrameTime to align with our controlled timestamps
+      (engine as any).lastFrameTime = 0;
+
+      // Simulate frames at ~20fps (50ms between frames)
+      let now = 0;
+      (engine as any).loop(now);
+      now += 50;
+
+      // 80 frames at 50ms each = 4 seconds — well over the 2s threshold
+      for (let i = 0; i < 80; i++) {
+        (engine as any).loop(now);
+        now += 50;
+      }
+
+      // Should have reduced: 10 particles * 0.75 = 7.5, floor = 7
+      expect(setDrawRangeSpy).toHaveBeenCalledWith(0, 7);
+      expect(engine.getQualityLevel()).toBe(0.75);
+    });
+
+    it('does not reduce quality when autoQuality is disabled', async () => {
+      engine = new HologramEngine(canvas, { autoQuality: false });
+      await engine.init();
+
+      (engine as any).lastFrameTime = 0;
+
+      let now = 0;
+      (engine as any).loop(now);
+      now += 50;
+
+      for (let i = 0; i < 80; i++) {
+        (engine as any).loop(now);
+        now += 50;
+      }
+
+      expect(engine.getQualityLevel()).toBe(1);
+    });
+
+    it('does not reduce quality with healthy FPS (~60fps)', async () => {
+      engine = new HologramEngine(canvas, { autoQuality: true });
+      await engine.init();
+
+      (engine as any).lastFrameTime = 0;
+
+      // Simulate frames at ~60fps
+      let now = 0;
+      (engine as any).loop(now);
+      now += 16;
+
+      for (let i = 0; i < 300; i++) {
+        (engine as any).loop(now);
+        now += 16;
+      }
+
+      expect(engine.getQualityLevel()).toBe(1);
+    });
+
+    it('resets quality after FPS recovers', async () => {
+      engine = new HologramEngine(canvas, { autoQuality: true });
+      await engine.init();
+
+      (engine as any).lastFrameTime = 0;
+
+      // Phase 1: Low FPS for ~3 seconds to trigger reduction
+      let now = 0;
+      (engine as any).loop(now);
+      now += 50;
+      for (let i = 0; i < 80; i++) {
+        (engine as any).loop(now);
+        now += 50;
+      }
+
+      // Verify quality dropped
+      expect(engine.getQualityLevel()).toBe(0.75);
+
+      // Phase 2: Healthy FPS for recovery (recovery is 2x speed)
+      for (let i = 0; i < 300; i++) {
+        (engine as any).loop(now);
+        now += 16;
+      }
+
+      expect(engine.getQualityLevel()).toBe(1);
+    });
+  });
+
   describe('resize', () => {
     it('resize event triggers renderer and camera update', async () => {
       engine = new HologramEngine(canvas);

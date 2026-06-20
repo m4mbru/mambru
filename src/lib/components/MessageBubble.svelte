@@ -93,7 +93,12 @@
   role="listitem"
   aria-label="{message.role} message"
 >
-  <!-- Avatar -->
+  <!--
+    Message role indicator (inline SVG icon).
+    This is NOT the same as the 3D hologram avatar (HologramWidget).
+    These per-message role indicators coexist with the floating
+    3D particle avatar. Decision: keep both — different purpose.
+  -->
   <div class="avatar {message.role}">
     {#if message.role === 'user'}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

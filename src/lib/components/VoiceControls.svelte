@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { voice, setRecording, setTranscription, setError } from '../stores/voice';
+  import { voice, setRecording, setTranscription, setError, setContinuousMode } from '../stores/voice';
   import { conversation } from '../stores/conversation';
   import { startCapture, stopCapture, getVoiceStatus, toggleTts } from '../api/voice';
   import {
@@ -108,20 +108,27 @@
   // ── Simulate audio level while recording ─────────────────────────────────
 
   function simulateAudioLevel() {
-    if (!pttPressed) {
+    if (!pttPressed && !$voice.continuousMode) {
       audioLevel = 0;
+      voice.update((s) => ({ ...s, audioLevel: 0 }));
       return;
     }
-    audioLevel = 0.2 + Math.random() * 0.6; // 0.2 - 0.8 range for visual effect
+    // Generate simulated audio level (in production this comes from mic)
+    const level = $voice.isRecording || pttPressed
+      ? 0.2 + Math.random() * 0.6
+      : 0;
+    audioLevel = level;
+    voice.update((s) => ({ ...s, audioLevel: level }));
     animationFrameId = requestAnimationFrame(simulateAudioLevel);
   }
 
-  $: if (pttPressed) {
+  $: if (pttPressed || ($voice.continuousMode && $voice.isRecording)) {
     cancelAnimationFrame(animationFrameId!);
     simulateAudioLevel();
   } else {
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
     audioLevel = 0;
+    voice.update((s) => ({ ...s, audioLevel: 0 }));
   }
 
   // ── Livecycle ───────────────────────────────────────────────────────────
@@ -193,6 +200,31 @@
         <line x1="23" y1="9" x2="17" y2="15" />
         <line x1="17" y1="9" x2="23" y2="15" />
       </svg>
+    {/if}
+  </button>
+
+  <!-- Continuous/PTT mode toggle -->
+  <button
+    class="voice-btn mode-btn"
+    class:continuous={$voice.continuousMode}
+    on:click={() => setContinuousMode(!$voice.continuousMode)}
+    title={$voice.continuousMode ? 'Switch to Push-to-Talk' : 'Switch to Continuous'}
+    aria-pressed={$voice.continuousMode}
+  >
+    {#if $voice.continuousMode}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+      <span class="mode-label">Continuous</span>
+    {:else}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+        <line x1="12" y1="19" x2="12" y2="23" />
+        <line x1="8" y1="23" x2="16" y2="23" />
+      </svg>
+      <span class="mode-label">PTT</span>
     {/if}
   </button>
 
@@ -287,6 +319,15 @@
   .tts-btn[aria-pressed='true'] {
     color: var(--color-accent);
     border-color: var(--color-accent);
+  }
+
+  .mode-btn[aria-pressed='true'] {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+
+  .mode-label {
+    font-size: var(--font-size-xs);
   }
 
   /* ── PTT Button ─────────────────────────────── */
